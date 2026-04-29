@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-background: var(--color-background);
+  --color-on-background: var(--color-on-background);
+  --color-surface: var(--color-surface);
+  --color-on-surface: var(--color-on-surface);
+  --color-on-surface-variant: var(--color-on-surface-variant);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-primary: var(--color-primary);
+  --color-on-primary: var(--color-on-primary);
+  --color-secondary: var(--color-secondary);
+  --color-tertiary: var(--color-tertiary);
+  --color-outline: var(--color-outline);
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  :root, .dark {
+    --color-background: #000000;
+    --color-on-background: #ffffff;
+    --color-surface: #0a0a0a;
+    --color-on-surface: #f5f5f5;
+    --color-on-surface-variant: #a1a1aa;
+    --color-surface-hover: #141414;
+    --color-primary: #ffffff;
+    --color-on-primary: #000000;
+    --color-secondary: #27272a;
+    --color-tertiary: #52525b;
+    --color-outline: #27272a;
+  }
+
+  .light {
+    --color-background: #ffffff;
+    --color-on-background: #000000;
+    --color-surface: #f5f5f5;
+    --color-on-surface: #0a0a0a;
+    --color-on-surface-variant: #52525b;
+    --color-surface-hover: #e5e5e5;
+    --color-primary: #000000;
+    --color-on-primary: #ffffff;
+    --color-secondary: #d4d4d8;
+    --color-tertiary: #a1a1aa;
+    --color-outline: #e5e5e5;
+  }
+
+  body {
+    @apply bg-background text-on-background font-sans antialiased selection:bg-primary selection:text-background;
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+  /* Hide global scrollbars */
+  html, body {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html::-webkit-scrollbar, body::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.glass-panel {
+  @apply bg-surface/80 backdrop-blur-xl border border-outline;
+}
+
+.nav-gradient {
+  background: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+}
+
+.animate-sparkle {
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
