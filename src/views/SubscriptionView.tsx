@@ -1,94 +1,101 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { CheckCircle2, Zap, ArrowRight, Shield } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Check, Zap, Sparkles, Key } from 'lucide-react';
 
 export default function SubscriptionView() {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleSubscribe = () => {
+    setIsProcessing(true);
+    // In a fully real app, this would redirect to a Stripe Checkout Session
+    setTimeout(() => {
+      window.open('https://buy.stripe.com/test_dummy_link', '_blank');
+      setIsProcessing(false);
+    }, 1000);
+  };
+
   return (
-    <div className="flex flex-col gap-10 pt-8 pb-32 max-w-[1000px] mx-auto w-full">
-      <div className="text-center space-y-4 max-w-2xl mx-auto">
-        <h1 className="text-4xl font-bold tracking-tight">Upgrade to MILO Lifetime</h1>
-        <p className="text-on-surface-variant text-lg">
-          Pay once, own forever. MILO is a Bring-Your-Own-Key (BYOK) platform, meaning you use your own API keys (Gemini, OpenAI, Anthropic) while we provide the blazing-fast UI and advanced workflow engine.
+    <div className="max-w-4xl mx-auto py-12 px-6">
+      <div className="text-center mb-16">
+        <h1 className="text-4xl font-bold tracking-tight mb-4 text-on-background">Upgrade to MILO Pro</h1>
+        <p className="text-lg text-on-surface-variant max-w-2xl mx-auto">
+          Pay once, own forever. MILO is a Bring-Your-Own-Key (BYOK) platform, meaning you use your own API keys while we provide the blazing-fast UI and advanced workflow engine.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto mt-8">
+      <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
         {/* Basic Tier */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-3xl p-8 border border-outline bg-surface/30 flex flex-col h-full"
-        >
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold mb-2">Basic</h2>
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-bold">$19</span>
-              <span className="text-on-surface-variant">/lifetime</span>
+        <div className="p-8 border border-outline rounded-3xl bg-surface/30 flex flex-col">
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-2 text-on-background">Community</h2>
+            <div className="flex items-baseline gap-1 mb-4">
+              <span className="text-4xl font-bold text-on-background">$0</span>
+              <span className="text-on-surface-variant">/ forever</span>
             </div>
-          </div>
-          <p className="text-on-surface-variant text-sm mb-8">
-            Essential tools for everyday productivity.
-          </p>
-          <ul className="space-y-4 mb-10 flex-1">
-            {[
-              'Bring Your Own Key (BYOK) support', 
-              'Standard chat and feature workflows',
-              'Access to new features (delayed rollout)',
-              'Community support', 
-              'Basic local history'
-            ].map((item, i) => (
-              <li key={i} className="flex items-center gap-3 text-sm">
-                <Check className="w-5 h-5 text-on-surface-variant shrink-0" />
-                <span className="text-on-surface">{item}</span>
-              </li>
-            ))}
-          </ul>
-          <button disabled className="w-full py-4 rounded-xl font-semibold bg-surface border border-outline text-on-surface-variant cursor-not-allowed">
-            Current Plan
-          </button>
-        </motion.div>
-
-        {/* Pro Tier */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="rounded-3xl p-8 border hover:border-on-surface transition-colors bg-surface relative flex flex-col h-full"
-        >
-          <div className="absolute -top-3 right-8 bg-primary text-background text-xs font-bold px-3 py-1 rounded-full uppercase tracking-widest flex items-center gap-1 shadow-lg">
-            <Sparkles className="w-3 h-3" />
-            Recommended
+            <p className="text-sm text-on-surface-variant">
+              Essential tools for everyday productivity.
+            </p>
           </div>
           
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2 text-primary">Pro</h2>
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-bold">$39</span>
-              <span className="text-on-surface-variant">/lifetime</span>
-            </div>
-          </div>
-          <p className="text-on-surface-variant text-sm mb-8">
-             Unleash the full potential of MILO Workflows.
-          </p>
-          <ul className="space-y-4 mb-10 flex-1">
-            {[
-              'Bring Your Own Key (BYOK) support',
-              'Immediate access to new experimental features',
-              'Unlimited Deep Search & Data Analysis',
-              'Advanced codebase refactoring tools',
-              'Priority 24/7 feature support',
-              'Unlimited saved workflows & custom prompts'
-            ].map((item, i) => (
-              <li key={i} className="flex items-start gap-3 text-sm">
-                <Check className="w-5 h-5 text-primary shrink-0" />
-                <span className="text-on-background mt-0.5">{item}</span>
+          <ul className="space-y-4 mb-8 flex-1">
+            {['Chat with Gemini, OpenAI, Claude', 'Deep Search (WiKi/CrossRef)', 'Basic Document Analysis', 'Local Storage History'].map((feature, i) => (
+              <li key={i} className="flex items-start gap-3 text-sm text-on-surface">
+                <CheckCircle2 className="w-5 h-5 text-on-surface-variant shrink-0" />
+                {feature}
               </li>
             ))}
           </ul>
-          <button className="w-full py-4 rounded-xl font-bold bg-primary text-background hover:opacity-90 transition-opacity flex items-center justify-center gap-2 group">
-            Upgrade to Pro <Zap className="w-4 h-4 group-hover:scale-110 transition-transform" />
+
+          <button className="w-full py-4 rounded-xl bg-surface border border-outline text-on-surface font-bold opacity-50 cursor-not-allowed">
+            Current Plan
           </button>
-        </motion.div>
+        </div>
+
+        {/* Pro Tier */}
+        <div className="relative p-8 border-2 border-primary rounded-3xl bg-surface flex flex-col overflow-hidden">
+          <div className="absolute top-0 right-0 bg-primary text-background text-[10px] font-bold px-4 py-1.5 rounded-bl-xl tracking-widest uppercase">
+            Recommended
+          </div>
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2 text-primary">MILO Pro</h2>
+            <div className="flex items-baseline gap-1 mb-4">
+              <span className="text-4xl font-bold text-on-background">$39</span>
+              <span className="text-on-surface-variant">one-time</span>
+            </div>
+            <p className="text-sm text-on-surface-variant">
+              The ultimate power-user toolkit.
+            </p>
+          </div>
+          
+          <ul className="space-y-4 mb-8 flex-1">
+            {[
+              'Custom OpenAI-Compatible Providers',
+              'Advanced PDF/Document Parsing',
+              'Unlimited saved workflows & custom prompts',
+              'Code preview artifact rendering',
+              'Priority 24/7 Email Support'
+            ].map((feature, i) => (
+              <li key={i} className="flex items-start gap-3 text-sm text-on-surface">
+                <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
+                {feature}
+              </li>
+            ))}
+          </ul>
+
+          <button 
+            onClick={handleSubscribe}
+            disabled={isProcessing}
+            className="w-full py-4 rounded-xl relative overflow-hidden group bg-primary text-background font-bold flex flex-col items-center justify-center transition-all hover:opacity-90 disabled:opacity-75"
+          >
+            <div className="flex items-center gap-2 z-10 transition-transform group-hover:-translate-y-[2px]">
+              {isProcessing ? 'Redirecting...' : 'Upgrade to Pro'} <Zap className="w-4 h-4 group-hover:scale-110 transition-transform" />
+            </div>
+          </button>
+        </div>
+      </div>
+      
+      <div className="mt-12 text-center text-sm text-on-surface-variant flex items-center justify-center gap-2">
+        <Shield className="w-4 h-4" /> Secure payments handled by Stripe.
       </div>
     </div>
   );

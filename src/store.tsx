@@ -46,7 +46,7 @@ const defaultProfile: UserProfile = {
 
 const defaultPreferences: Preferences = {
   theme: 'dark',
-  compactMode: true,
+  compactMode: false,
   modelTraining: true,
   geminiKey: '',
   openaiKey: '',

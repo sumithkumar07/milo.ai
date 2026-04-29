@@ -93,7 +93,6 @@ export default function SettingsView() {
                       {preferences.theme === 'dark' ? 'Dark Mode' : 'Light Mode'} <ChevronDown className="w-4 h-4" />
                     </button>
                   </div>
-                  
                   <div className="flex justify-between items-center border-t border-outline pt-5">
                     <span className="text-sm text-on-surface-variant">Compact Mode</span>
                     <label className="relative inline-flex items-center cursor-pointer">

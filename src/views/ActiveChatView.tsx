@@ -61,6 +61,7 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
 
 export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage }: ActiveChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { preferences } = useAppContext();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -87,7 +88,7 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
           <Download className="w-4 h-4" /> Export Chat
         </button>
       </div>
-      <div className="flex flex-col gap-8">
+      <div className={`flex flex-col ${preferences.compactMode ? 'gap-3' : 'gap-8'}`}>
       <AnimatePresence initial={false}>
         {messages.map((message) => (
           message.role === 'user' ? (
@@ -95,20 +96,24 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
               <motion.div 
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="max-w-[85%] bg-surface/80 backdrop-blur-md rounded-2xl rounded-tr-sm px-5 py-4 border border-white/5 shadow-sm"
+                className={`max-w-[85%] bg-surface/80 backdrop-blur-md border border-white/5 shadow-sm
+                  ${preferences.compactMode ? 'rounded-xl px-4 py-2 text-sm' : 'rounded-2xl rounded-tr-sm px-5 py-4'}
+                `}
               >
-                <div className="text-on-background text-base whitespace-pre-wrap">{message.content}</div>
+                <div className="text-on-background whitespace-pre-wrap">{message.content}</div>
               </motion.div>
             </div>
           ) : (
             <div key={message.id} className="flex w-full gap-4 items-start">
-              <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-surface border border-outline mt-1">
-                <Sparkles className="w-5 h-5 text-primary" />
+              <div className={`flex-shrink-0 flex items-center justify-center bg-surface border border-outline mt-1
+                ${preferences.compactMode ? 'w-6 h-6 rounded-md' : 'w-8 h-8 rounded-full'}
+              `}>
+                <Sparkles className={`text-primary ${preferences.compactMode ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
               </div>
               
               <div className="flex-1 flex flex-col gap-6">
                 {message.isStreaming && message.content === '' && (
-                  <div className="space-y-3 max-w-2xl opacity-30 mt-2">
+                  <div className={`max-w-2xl opacity-30 ${preferences.compactMode ? 'space-y-2 mt-1' : 'space-y-3 mt-2'}`}>
                     <div className="h-3.5 bg-outline rounded-full w-full animate-pulse" />
                     <div className="h-3.5 bg-outline rounded-full w-[94%] animate-pulse" />
                     <div className="h-3.5 bg-outline rounded-full w-[80%] animate-pulse" />
@@ -118,7 +123,9 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="prose prose-invert prose-p:leading-relaxed prose-pre:bg-surface prose-pre:border-outline max-w-none text-on-background w-full overflow-hidden"
+                    className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-surface prose-pre:border-outline max-w-none text-on-background w-full overflow-hidden
+                      ${preferences.compactMode ? 'prose-sm' : ''}
+                    `}
                   >
                     <Markdown 
                       remarkPlugins={[remarkGfm]}
