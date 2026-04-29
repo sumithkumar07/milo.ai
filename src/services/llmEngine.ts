@@ -13,7 +13,6 @@ export interface LLMConfig {
   customBaseUrl?: string;
   customApiKey?: string;
   customModelName?: string;
-  tavilyKey?: string;
 }
 
 const FEATURE_PROMPTS: Record<FeatureId, string> = {
@@ -100,7 +99,7 @@ export async function* streamChat(
       const latestMsg = messages[messages.length - 1].content;
 
       const chat = client.chats.create({
-          model: isDeepSearch ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview",
+          model: isDeepSearch ? "gemini-2.5-pro" : "gemini-2.5-flash",
           config: {
             systemInstruction: systemPrompt,
             tools: isDeepSearch ? [{ googleSearch: {} }] : undefined,
@@ -122,7 +121,23 @@ export async function* streamChat(
       if (!isCustom && !config.openaiKey) throw new Error("OpenAI API key is required. Please add it in Settings.");
       if (isCustom && !config.customBaseUrl) throw new Error("Custom Base URL is required. Please add it in Settings.");
 
-      const client = new OpenAI({ apiKey, baseURL, dangerouslyAllowBrowser: true });
+      const client = new OpenAI({ 
+        apiKey, 
+        baseURL, 
+        dangerouslyAllowBrowser: true,
+        fetch: async (url, init) => {
+          return fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targetUrl: url.toString(),
+              method: init?.method,
+              headers: init?.headers,
+              body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body
+            })
+          });
+        }
+      });
       
       const apiMessages = [
         { role: 'system', content: systemPrompt },
@@ -142,7 +157,22 @@ export async function* streamChat(
       }
     } else if (config.provider === 'anthropic') {
       if (!config.anthropicKey) throw new Error("Anthropic API key is required. Please add it in Settings.");
-      const client = new Anthropic({ apiKey: config.anthropicKey, dangerouslyAllowBrowser: true });
+      const client = new Anthropic({ 
+        apiKey: config.anthropicKey, 
+        dangerouslyAllowBrowser: true,
+        fetch: async (url, init) => {
+          return fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targetUrl: url.toString(),
+              method: init?.method,
+              headers: init?.headers,
+              body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body
+            })
+          });
+        }
+      });
       
       const stream = await client.messages.create({
         model: 'claude-3-opus-20240229',

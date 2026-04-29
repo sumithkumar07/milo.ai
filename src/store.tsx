@@ -17,7 +17,6 @@ interface Preferences {
   customBaseUrl: string;
   customApiKey: string;
   customModelName: string;
-  tavilyKey: string;
   activeProvider: 'gemini' | 'openai' | 'anthropic' | 'custom';
 }
 
@@ -40,9 +39,9 @@ interface AppContextType {
 }
 
 const defaultProfile: UserProfile = {
-  name: 'Sumith Kumar',
-  email: 'sumithkumar5701@gmail.com',
-  avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDIc_OuwiAmjdCYPfrSPABXogya1fkD7UEmAJ5ym6KPdShs7D1M4U8Eg5jgdVW3penr41fB6YmCGjTl3D2RPsR9hgM0Y7rpgy_o2hHfuIesjPNx6RL8oXjCqanS_pzXaRv6LIT8PrKPAZv6d0nt3js31qd26uk57ueeX8Qh7OoXLj4gt_6sWQnx6Dz5ifQ3SewPC3DRpY6g3drGl9zCJ37kuLkViV048dCHsrpbUDfm6vBThwtisvpqjt_t6JzwwLYLELPiwNjs3Knv'
+  name: 'Guest User',
+  email: 'user@example.com',
+  avatarUrl: ''
 };
 
 const defaultPreferences: Preferences = {
@@ -55,7 +54,6 @@ const defaultPreferences: Preferences = {
   customBaseUrl: 'https://api.openai.com/v1',
   customApiKey: '',
   customModelName: 'gpt-3.5-turbo',
-  tavilyKey: '',
   activeProvider: 'gemini'
 };
 
