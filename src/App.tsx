@@ -20,7 +20,14 @@ import { useAppContext } from './store';
 export default function App() {
   const { messages, addMessage, updateMessage, currentSessionId, preferences } = useAppContext();
   const [view, setView] = useState<ViewType>('home');
-  const [pinnedFeatures, setPinnedFeatures] = useState<FeatureId[]>(['deep-search']);
+  const [pinnedFeatures, setPinnedFeatures] = useState<FeatureId[]>(() => {
+    const saved = localStorage.getItem('milo_pinned_features');
+    return saved ? JSON.parse(saved) : ['deep-search'];
+  });
+  
+  useEffect(() => {
+    localStorage.setItem('milo_pinned_features', JSON.stringify(pinnedFeatures));
+  }, [pinnedFeatures]);
   const [activeFeature, setActiveFeature] = useState<FeatureId | null>(null);
   
   const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +44,13 @@ export default function App() {
     }
   }, [preferences.theme]);
 
-  const sendMessage = async (text: string) => {
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
+  const sendMessage = async (text: string, overrideFeature?: FeatureId) => {
     if (!text.trim()) return;
 
     if (abortControllerRef.current) {
@@ -66,7 +79,7 @@ export default function App() {
           customApiKey: preferences.customApiKey,
           customModelName: preferences.customModelName
         },
-        activeFeature,
+        overrideFeature || activeFeature,
         abortControllerRef.current.signal
       );
 
@@ -93,7 +106,7 @@ export default function App() {
       case 'home':
         return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={sendMessage} />;
       case 'active-chat':
-        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={sendMessage} />;
+        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={sendMessage} onStop={stopGeneration} />;
 
       case 'library':
         return <LibraryView 

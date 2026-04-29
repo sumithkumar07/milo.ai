@@ -65,7 +65,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : [];
   });
   
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
+    return localStorage.getItem('milo_current_session_id') || null;
+  });
   
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = localStorage.getItem('milo_current_messages');
@@ -82,7 +84,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : defaultPreferences;
   });
 
-  // Save to locale storage on change
+  useEffect(() => {
+    if (currentSessionId) {
+      localStorage.setItem('milo_current_session_id', currentSessionId);
+    } else {
+      localStorage.removeItem('milo_current_session_id');
+    }
+  }, [currentSessionId]);
   useEffect(() => localStorage.setItem('milo_sessions', JSON.stringify(sessions)), [sessions]);
   useEffect(() => localStorage.setItem('milo_current_messages', JSON.stringify(messages)), [messages]);
   useEffect(() => localStorage.setItem('milo_profile', JSON.stringify(profile)), [profile]);

@@ -9,7 +9,7 @@ interface HomeViewProps {
   activeFeature: FeatureId | null;
   setActiveFeature: (feature: FeatureId | null) => void;
   setView: (view: ViewType) => void;
-  onSendMessage: (msg: string) => void;
+  onSendMessage: (msg: string, overrideFeature?: FeatureId) => void;
 }
 
 export default function HomeView({ activeFeature, setActiveFeature, setView, onSendMessage }: HomeViewProps) {
@@ -17,8 +17,8 @@ export default function HomeView({ activeFeature, setActiveFeature, setView, onS
 
   const suggestions = [
     { 
-      title: "Summarize this article", 
-      desc: "Paste a link or text to get a concise breakdown.", 
+      title: "Help me with a document", 
+      desc: "Upload a document, PDF, or paste text to get a concise breakdown.", 
       icon: FileText,
       color: "text-blue-400"
     },
@@ -94,13 +94,13 @@ export default function HomeView({ activeFeature, setActiveFeature, setView, onS
               onClick={() => {
                 if (item.title.includes('Deep Search')) {
                   setActiveFeature('deep-search');
-                  onSendMessage("Deep Search 'Latest AI trends'");
-                } else if (item.title.includes('article')) {
+                  onSendMessage("Deep Search 'Latest AI trends'", 'deep-search');
+                } else if (item.title.includes('document')) {
                   setActiveFeature('doc-analysis');
-                  onSendMessage(item.title);
+                  onSendMessage("I need help analyzing a document. I will attach it next.", 'doc-analysis');
                 } else if (item.title.includes('code')) {
                   setActiveFeature('code-gen');
-                  onSendMessage(item.title);
+                  onSendMessage(item.title, 'code-gen');
                 } else {
                   onSendMessage(item.title);
                 }
@@ -128,7 +128,7 @@ export default function HomeView({ activeFeature, setActiveFeature, setView, onS
             <ChatInput 
               activeFeature={activeFeature} 
               onRemoveFeature={() => setActiveFeature(null)} 
-              onSend={onSendMessage}
+              onSend={(msg) => onSendMessage(msg, activeFeature || undefined)}
             />
           </div>
         </div>

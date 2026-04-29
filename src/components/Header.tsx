@@ -22,7 +22,7 @@ export default function Header({ setView }: HeaderProps) {
         <div className="w-8 h-8 flex items-center justify-center bg-primary text-background rounded-full">
           <CircleDashed className="w-5 h-5" />
         </div>
-        <span className="text-lg font-bold tracking-tight text-white">MILO AI</span>
+        <span className="text-lg font-bold tracking-tight text-on-background">MILO AI</span>
       </div>
 
       <div className="hidden md:flex flex-1" />
@@ -42,19 +42,19 @@ export default function Header({ setView }: HeaderProps) {
         </button>
         <button 
           onClick={() => setView('library')}
-          className="text-on-surface-variant hover:text-white transition-all duration-300 p-2 rounded-full"
+          className="text-on-surface-variant hover:text-on-background transition-all duration-300 p-2 rounded-full"
         >
           <History className="w-4 h-4" />
         </button>
         <button 
           onClick={() => setView('help')}
-          className="text-on-surface-variant hover:text-white transition-all duration-300 p-2 rounded-full hidden sm:block"
+          className="text-on-surface-variant hover:text-on-background transition-all duration-300 p-2 rounded-full hidden sm:block"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-help-circle"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
         </button>
         <button 
           onClick={() => setView('settings')}
-          className="text-on-surface-variant hover:text-white transition-all duration-300 p-2 rounded-full hidden md:block"
+          className="text-on-surface-variant hover:text-on-background transition-all duration-300 p-2 rounded-full hidden md:block"
         >
           <Settings className="w-4 h-4" />
         </button>

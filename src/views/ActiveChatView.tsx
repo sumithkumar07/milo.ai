@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { useAppContext } from '../store';
 import { Sparkles, CheckCircle2, Loader2, Circle, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatInput from '../components/ChatInput';
@@ -11,7 +12,8 @@ interface ActiveChatViewProps {
   setActiveFeature: (feature: FeatureId | null) => void;
   messages: Message[];
   isLoading: boolean;
-  onSendMessage: (msg: string) => void;
+  onSendMessage: (msg: string, overrideFeature?: FeatureId) => void;
+  onStop?: () => void;
 }
 
 function CodeBlock({ node, inline, className, children, ...props }: any) {
@@ -59,7 +61,7 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
   );
 }
 
-export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage }: ActiveChatViewProps) {
+export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage, onStop }: ActiveChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { preferences } = useAppContext();
 
@@ -149,7 +151,9 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
           <ChatInput 
             activeFeature={activeFeature} 
             onRemoveFeature={() => setActiveFeature(null)} 
-            onSend={onSendMessage}
+            onSend={(msg) => onSendMessage(msg, activeFeature || undefined)}
+            isLoading={isLoading}
+            onStop={onStop}
           />
         </div>
       </div>

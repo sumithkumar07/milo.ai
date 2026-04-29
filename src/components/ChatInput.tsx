@@ -3,6 +3,7 @@ import {
   Paperclip, 
   Mic, 
   ArrowUp,
+  Square,
   X
 } from 'lucide-react';
 import { FeatureId } from '../types';
@@ -13,6 +14,8 @@ interface ChatInputProps {
   onSend?: (text: string) => void;
   activeFeature?: FeatureId | null;
   onRemoveFeature?: () => void;
+  isLoading?: boolean;
+  onStop?: () => void;
 }
 
 import * as pdfjsLib from 'pdfjs-dist';
@@ -22,7 +25,9 @@ export default function ChatInput({
   placeholder = "Message MILO...", 
   onSend,
   activeFeature = null,
-  onRemoveFeature
+  onRemoveFeature,
+  isLoading,
+  onStop
 }: ChatInputProps) {
   const feat = activeFeature ? FEATURES[activeFeature] : null;
   const [message, setMessage] = useState('');
@@ -48,7 +53,8 @@ export default function ChatInput({
       if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.js') || file.name.endsWith('.ts')) {
         try {
           const text = await file.text();
-          const fileContext = `\n\n--- Start of ${file.name} ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n\n`;
+          const isTruncated = text.length > 50000;
+          const fileContext = `\n\n--- Start of ${file.name} ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n${isTruncated ? '[NOTE: File was truncated due to length limits]\n' : ''}\n`;
           setMessage((prev) => prev ? `${prev}${fileContext}` : fileContext);
         } catch (err) {
           setMessage((prev) => prev ? `${prev} [Attached file: ${file.name}]` : `[Attached file: ${file.name}]`);
@@ -66,7 +72,8 @@ export default function ChatInput({
             const pageText = content.items.map((item: any) => item.str).join(' ');
             text += pageText + '\n';
           }
-          const fileContext = `\n\n--- Start of ${file.name} (PDF parsing) ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n\n`;
+          const isTruncated = text.length > 50000;
+          const fileContext = `\n\n--- Start of ${file.name} (PDF parsing) ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n${isTruncated ? '[NOTE: Document was truncated due to length limits]\n' : ''}\n`;
           setMessage((prev) => prev ? `${prev}${fileContext}` : fileContext);
         } catch (err) {
           console.error("PDF Parsing error:", err);
@@ -122,7 +129,7 @@ export default function ChatInput({
       <div className="relative flex items-end bg-surface/50 backdrop-blur-xl rounded-3xl border border-outline p-2 focus-within:border-on-surface-variant transition-all">
         <button 
           onClick={handleAttachment}
-          className="p-3 text-white/40 hover:text-white transition-colors rounded-full hover:bg-white/5 shrink-0"
+          className="p-3 text-on-surface-variant hover:text-on-background transition-colors rounded-full hover:bg-surface-hover shrink-0"
         >
           <Paperclip className="w-5 h-5" />
         </button>
@@ -135,14 +142,14 @@ export default function ChatInput({
         
         <button 
           onClick={handleMic}
-          className={`p-3 transition-colors rounded-full shrink-0 ${isRecording ? 'text-red-500 bg-red-500/10' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+          className={`p-3 transition-colors rounded-full shrink-0 ${isRecording ? 'text-red-500 bg-red-500/10' : 'text-on-surface-variant hover:text-on-background hover:bg-surface-hover'}`}
         >
           <Mic className="w-5 h-5" />
         </button>
 
         <textarea 
           rows={1}
-          className="flex-1 bg-transparent border-none text-white text-base focus:ring-0 placeholder:text-white/30 px-2 py-3 max-h-[200px] resize-none outline-none overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" 
+          className="flex-1 bg-transparent border-none text-on-background text-base focus:ring-0 placeholder:text-on-surface-variant px-2 py-3 max-h-[200px] resize-none outline-none overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" 
           placeholder={placeholder}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -155,17 +162,26 @@ export default function ChatInput({
         />
 
         <div className="flex items-center gap-2 pr-1 pb-1">
-          <button 
-            onClick={handleSend}
-            disabled={!message.trim()}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 shadow-lg ${
-              message.trim() 
-                ? 'bg-primary text-background hover:opacity-90' 
-                : 'bg-white/10 text-white/30 cursor-not-allowed'
-            }`}
-          >
-            <ArrowUp className="w-5 h-5 font-bold" />
-          </button>
+          {isLoading ? (
+            <button 
+              onClick={onStop}
+              className="w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 shadow-lg bg-surface-hover text-on-background hover:bg-surface-hover/80"
+            >
+              <Square className="w-4 h-4 fill-current" />
+            </button>
+          ) : (
+            <button 
+              onClick={handleSend}
+              disabled={!message.trim()}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 shadow-lg ${
+                message.trim() 
+                  ? 'bg-primary text-background hover:opacity-90' 
+                  : 'bg-surface-hover text-on-surface-variant cursor-not-allowed'
+              }`}
+            >
+              <ArrowUp className="w-5 h-5 font-bold" />
+            </button>
+          )}
         </div>
       </div>
       <p className="text-center mt-3 text-[10px] text-tertiary font-medium tracking-wide">

@@ -18,6 +18,26 @@ async function startServer() {
         return res.status(400).json({ error: "Missing targetUrl" });
       }
 
+      const allowedUrls = [
+        'api.openai.com',
+        'api.anthropic.com',
+        'en.wikipedia.org',
+        'api.crossref.org',
+        'api.groq.com',
+        'api.together.xyz',
+        'openrouter.ai',
+        'api.fireworks.ai',
+        'integrate.api.nvidia.com'
+      ];
+      
+      const isAllowed = allowedUrls.some(url => targetUrl.includes(url));
+      if (!isAllowed) {
+        // Also allow local URLs if needed or just fallback
+        if (!targetUrl.startsWith('https://')) {
+          return res.status(400).json({ error: "Invalid targetUrl" });
+        }
+      }
+
       // Remove sensitive restricted headers if they get forwarded
       const fetchHeaders: any = { ...headers };
       delete fetchHeaders['host'];

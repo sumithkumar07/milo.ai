@@ -175,7 +175,7 @@ export async function* streamChat(
       });
       
       const stream = await client.messages.create({
-        model: 'claude-3-opus-20240229',
+        model: 'claude-3-5-sonnet-latest',
         system: systemPrompt,
         messages: processedMessages.map(m => ({ role: m.role === 'model' ? 'assistant' : m.role as any, content: m.content })),
         max_tokens: 4096,
