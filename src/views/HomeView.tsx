@@ -135,6 +135,9 @@ export default function HomeView({ activeFeature, setActiveFeature, setView, onS
                 openaiKey: preferences.openaiKey,
                 customBaseUrl: preferences.customBaseUrl,
                 customApiKey: preferences.customApiKey,
+                geminiModel: preferences.geminiModel,
+                openaiModel: preferences.openaiModel,
+                customModelName: preferences.customModelName,
               }} />
           </div>
         </div>

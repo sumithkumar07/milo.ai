@@ -101,16 +101,46 @@ async function searchWikipedia(query: string): Promise<SearchResult[]> {
   }
 }
 
+const PUBLIC_SEARXNG_INSTANCES = [
+  'https://search.sapti.me',
+  'https://searx.tiekoetter.com',
+  'https://searx.be',
+  'https://search.bus-hit.me',
+  'https://searx.work',
+  'https://priv.au',
+  'https://searx.tuxcloud.net',
+  'https://searxng.site',
+];
+
+async function searchSearXNGWithRetry(query: string, preferredUrl?: string): Promise<{ results: SearchResult[]; usedUrl: string }> {
+  const instances = preferredUrl ? [preferredUrl, ...PUBLIC_SEARXNG_INSTANCES.filter(u => u !== preferredUrl)] : [...PUBLIC_SEARXNG_INSTANCES];
+  let lastError: Error | null = null;
+
+  for (const instanceUrl of instances) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${instanceUrl}/search?q=${encodeURIComponent(query)}&format=json&categories=general&engines=google,bing,duckduckgo,wikipedia&qformat=json`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const results = (data.results || []).slice(0, 8).map((r: any) => ({
+        title: r.title || '',
+        url: r.url || '',
+        snippet: r.content || '',
+        source: r.engine || 'SearXNG'
+      })).filter((r: SearchResult) => r.url && r.title);
+      if (results.length > 0) return { results, usedUrl: instanceUrl };
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+  return { results: [], usedUrl: '' };
+}
+
 async function searchSearXNG(query: string, baseUrl: string): Promise<SearchResult[]> {
-  const res = await fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&categories=general`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data.results || []).slice(0, 8).map((r: any) => ({
-    title: r.title || '',
-    url: r.url || '',
-    snippet: r.content || '',
-    source: r.engine || 'SearXNG'
-  }));
+  const res = await searchSearXNGWithRetry(query, baseUrl);
+  return res.results;
 }
 
 async function fetchUrlContent(url: string): Promise<string> {
@@ -135,19 +165,30 @@ function formatResults(results: SearchResult[]): string {
   ).join('\n\n');
 }
 
-export async function performSearch(query: string, backend: 'duckduckgo' | 'searxng' | 'unsearch' = 'duckduckgo', searxngUrl?: string): Promise<{ results: SearchResult[]; fetchedContent: string }> {
+export async function performSearch(query: string, backend: 'duckduckgo' | 'searxng' | 'unsearch' = 'searxng', searxngUrl?: string): Promise<{ results: SearchResult[]; fetchedContent: string }> {
   let results: SearchResult[] = [];
 
-  if (backend === 'searxng' && searxngUrl) {
-    results = await searchSearXNG(query, searxngUrl);
+  // Fallback chain: SearXNG (primary) → DuckDuckGo → Wikipedia
+  if (backend === 'searxng') {
+    const { results: searxResults } = await searchSearXNGWithRetry(query, searxngUrl);
+    results = searxResults;
     if (results.length === 0) {
       results = await searchDuckDuckGo(query);
     }
-  } else {
-    results = await searchDuckDuckGo(query);
     if (results.length === 0) {
       results = await searchWikipedia(query);
     }
+  } else if (backend === 'duckduckgo') {
+    results = await searchDuckDuckGo(query);
+    if (results.length === 0) {
+      const { results: searxResults } = await searchSearXNGWithRetry(query);
+      results = searxResults;
+    }
+    if (results.length === 0) {
+      results = await searchWikipedia(query);
+    }
+  } else {
+    results = await searchWikipedia(query);
   }
 
   // Fetch top 3 URLs for deeper content
@@ -168,6 +209,9 @@ export async function performSearch(query: string, backend: 'duckduckgo' | 'sear
   return { results, fetchedContent };
 }
 
+let lastSearchResults: SearchResult[] = [];
+export function getLastSearchResults(): SearchResult[] { return [...lastSearchResults]; }
+
 export async function* streamChat(
   messages: { role: 'user' | 'assistant' | 'model', content: string; imageUrl?: string }[],
   config: LLMConfig,
@@ -181,12 +225,15 @@ export async function* streamChat(
 
   // Pre-process Deep Search for non-Gemini models
   let processedMessages = [...messages];
+  let searchResults: SearchResult[] = [];
   if (activeFeature === 'deep-search' && config.provider !== 'gemini') {
     const latestQuery = messages[messages.length - 1].content;
-    const backend = config.searchBackend || 'duckduckgo';
+    const backend = config.searchBackend || 'searxng';
     
     yield "🔍 Searching the web...\n\n";
     const { results, fetchedContent } = await performSearch(latestQuery, backend, config.searxngUrl);
+    searchResults = results;
+    lastSearchResults = results;
     
     let statusMsg = '';
     if (results.length > 0) {

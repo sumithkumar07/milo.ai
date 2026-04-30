@@ -369,6 +369,38 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
                       </Markdown>
                     </motion.div>
                   )}
+                  {message.searchResults && message.searchResults.length > 0 && (
+                    <div className="mt-3 border border-outline/30 rounded-xl overflow-hidden">
+                      <div className="px-3 py-2 bg-surface/50 text-[11px] font-semibold text-on-surface-variant border-b border-outline/30 flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3 text-primary" />
+                        Sources
+                      </div>
+                      <div className="divide-y divide-outline/20">
+                        {message.searchResults.map((r, i) => (
+                          <a
+                            key={i}
+                            href={r.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex gap-3 p-3 hover:bg-surface-hover/50 transition-colors group"
+                          >
+                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                              {i + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[12px] font-medium text-primary group-hover:underline truncate">
+                                {r.title}
+                              </div>
+                              <div className="text-[11px] text-on-surface-variant/70 mt-0.5 line-clamp-2">
+                                {r.snippet}
+                              </div>
+                              <div className="text-[10px] text-tertiary mt-1">{r.source} · {new URL(r.url).hostname}</div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {!message.isStreaming && onRegenerate && (
                     <div className="flex gap-2">
                       <button
@@ -406,6 +438,9 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
               openaiKey: preferences.openaiKey,
               customBaseUrl: preferences.customBaseUrl,
               customApiKey: preferences.customApiKey,
+              geminiModel: preferences.geminiModel,
+              openaiModel: preferences.openaiModel,
+              customModelName: preferences.customModelName,
             }}
           />
         </div>

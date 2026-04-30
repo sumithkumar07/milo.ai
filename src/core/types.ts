@@ -13,6 +13,7 @@ export interface Message {
   content: string;
   isStreaming?: boolean;
   imageUrl?: string;
+  searchResults?: { title: string; url: string; snippet: string; source: string }[];
 }
 
 

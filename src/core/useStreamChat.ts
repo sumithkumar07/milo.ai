@@ -1,0 +1,229 @@
+import { useRef, useCallback } from 'react';
+import { streamChat, getLastSearchResults } from '../services/llmEngine';
+import { retrieveRelevantChunks, hasStoredDocuments } from '../services/rag/ragEngine';
+import { FeatureId, Message } from './types';
+import { LLMConfig } from '../services/llmEngine';
+
+interface StreamChatOptions {
+  activeFeature: FeatureId | null;
+  preferences: {
+    activeProvider: string;
+    geminiKey?: string;
+    openaiKey?: string;
+    anthropicKey?: string;
+    customBaseUrl?: string;
+    customApiKey?: string;
+    customModelName?: string;
+    geminiModel?: string;
+    openaiModel?: string;
+    anthropicModel?: string;
+    searchBackend?: 'duckduckgo' | 'searxng' | 'unsearch';
+    searxngUrl?: string;
+  };
+  getMessages: () => Message[];
+  addMessage: (message: Message) => void;
+  updateMessage: (id: string, content: string, isStreaming: boolean, extras?: Partial<Omit<Message, 'id' | 'role' | 'content' | 'isStreaming'>>) => void;
+  setIsLoading: (loading: boolean) => void;
+}
+
+function prefsToConfig(prefs: StreamChatOptions['preferences']): LLMConfig {
+  return {
+    provider: prefs.activeProvider as LLMConfig['provider'],
+    geminiKey: prefs.geminiKey,
+    openaiKey: prefs.openaiKey,
+    anthropicKey: prefs.anthropicKey,
+    customBaseUrl: prefs.customBaseUrl,
+    customApiKey: prefs.customApiKey,
+    customModelName: prefs.customModelName,
+    geminiModel: prefs.geminiModel,
+    openaiModel: prefs.openaiModel,
+    anthropicModel: prefs.anthropicModel,
+    searchBackend: prefs.searchBackend,
+    searxngUrl: prefs.searxngUrl,
+  };
+}
+
+interface ChatMessageInput {
+  role: 'user' | 'model';
+  content: string;
+  imageUrl?: string;
+}
+
+async function enrichWithRAG(
+  text: string,
+  preferences: StreamChatOptions['preferences']
+): Promise<{ finalText: string; ragContext: string }> {
+  let finalText = text;
+  let ragContext = '';
+  if (hasStoredDocuments()) {
+    try {
+      const retrieved = await retrieveRelevantChunks(text, 5, {
+        provider: preferences.activeProvider,
+        geminiKey: preferences.geminiKey,
+        openaiKey: preferences.openaiKey,
+        customBaseUrl: preferences.customBaseUrl,
+        customApiKey: preferences.customApiKey,
+      });
+      if (retrieved.chunks.length > 0) {
+        ragContext = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}]\n${c.text}`).join('\n\n---\n\n');
+        finalText = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${ragContext}\n\n---\n\nUser Question: ${text}`;
+      }
+    } catch (err) {
+      console.error('RAG retrieval failed:', err);
+    }
+  }
+  return { finalText, ragContext };
+}
+
+function buildEngineMessages(
+  history: Message[],
+  lastUserContent: string,
+  lastUserImage: string | undefined,
+  ragContext: string
+): ChatMessageInput[] {
+  const mapped = history.map(m => ({
+    role: m.role as 'user' | 'model',
+    content: m.content,
+    imageUrl: m.imageUrl
+  }));
+  if (ragContext) {
+    mapped[mapped.length - 1] = { role: 'user' as const, content: lastUserContent, imageUrl: lastUserImage };
+  }
+  return mapped;
+}
+
+async function consumeStream(
+  messages: ChatMessageInput[],
+  config: LLMConfig,
+  feature: FeatureId | null,
+  signal: AbortSignal,
+  onUpdate: (id: string, text: string, streaming: boolean, extras?: Partial<Message>) => void
+): Promise<{ fullText: string }> {
+  const engineStream = streamChat(messages, config, feature, signal);
+  let fullText = '';
+  for await (const chunk of engineStream) {
+    if (chunk) {
+      fullText += chunk;
+      onUpdate('', fullText, true);
+    }
+  }
+  return { fullText };
+}
+
+export function useStreamChat(options: StreamChatOptions) {
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  }, []);
+
+  const startStream = useCallback(
+    async (
+      messages: ChatMessageInput[],
+      modelMessageId: string,
+      featureOverride?: FeatureId
+    ) => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+      options.setIsLoading(true);
+
+      try {
+        const { fullText } = await consumeStream(
+          messages,
+          prefsToConfig(options.preferences),
+          featureOverride ?? options.activeFeature,
+          abortControllerRef.current.signal,
+          (_id, text, streaming, extras) => options.updateMessage(modelMessageId, text, streaming, extras)
+        );
+        const searchResults = (featureOverride ?? options.activeFeature) === 'deep-search' ? getLastSearchResults() : [];
+        options.updateMessage(modelMessageId, fullText, false, searchResults.length > 0 ? { searchResults } : undefined);
+      } catch (error: any) {
+        if (error.message !== 'Aborted') {
+          console.error('Chat error:', error);
+          options.updateMessage(modelMessageId, error.message || 'MILO encountered an error. Please try again.', false);
+        }
+      } finally {
+        options.setIsLoading(false);
+      }
+    },
+    [options]
+  );
+
+  const sendMessage = useCallback(
+    async (text: string, imageUrl?: string, overrideFeature?: FeatureId) => {
+      if (!text.trim() && !imageUrl) return;
+      cancel();
+
+      const { finalText } = await enrichWithRAG(text, options.preferences);
+      const newMessage: Message = { id: Date.now().toString(), role: 'user', content: text, imageUrl };
+      options.addMessage(newMessage);
+
+      const modelMessageId = (Date.now() + 1).toString();
+      options.addMessage({ id: modelMessageId, role: 'model', content: '', isStreaming: true });
+
+      const history = options.getMessages();
+      const engineMessages: ChatMessageInput[] = history.map(m => ({
+        role: m.role as 'user' | 'model',
+        content: m.content,
+        imageUrl: m.imageUrl
+      }));
+      engineMessages[engineMessages.length - 1] = { role: 'user' as const, content: finalText, imageUrl };
+
+      startStream(engineMessages, modelMessageId, overrideFeature);
+    },
+    [cancel, options, startStream]
+  );
+
+  const regenerateMessage = useCallback(
+    async (history: Message[], messageIndex: number) => {
+      const targetMessage = history[messageIndex];
+      if (!targetMessage || targetMessage.role !== 'model') return;
+      cancel();
+
+      const messagesUpToUser = history.slice(0, messageIndex);
+      const lastUserMsg = messagesUpToUser.filter(m => m.role === 'user').pop();
+      const { finalText } = lastUserMsg ? await enrichWithRAG(lastUserMsg.content, options.preferences) : { finalText: '' };
+
+      options.updateMessage(targetMessage.id, '', true);
+
+      const engineMessages = messagesUpToUser.map(m => {
+        const mapped: ChatMessageInput = { role: m.role as 'user' | 'model', content: m.content, imageUrl: m.imageUrl };
+        if (finalText && m === lastUserMsg) mapped.content = finalText;
+        return mapped;
+      });
+
+      startStream(engineMessages, targetMessage.id);
+    },
+    [cancel, options, startStream]
+  );
+
+  const branchFromEdit = useCallback(
+    async (history: Message[], messageIndex: number, newContent: string) => {
+      const targetMessage = history[messageIndex];
+      if (!targetMessage || targetMessage.role !== 'user') return;
+      cancel();
+
+      const { finalText } = await enrichWithRAG(newContent, options.preferences);
+      options.updateMessage(targetMessage.id, newContent, false);
+
+      const modelMessageId = (Date.now() + 1).toString();
+      options.addMessage({ id: modelMessageId, role: 'model', content: '', isStreaming: true });
+
+      const engineMessages = history.slice(0, messageIndex + 1).map((m, idx) => {
+        if (idx === messageIndex) {
+          return { role: m.role as 'user' | 'model', content: finalText, imageUrl: targetMessage.imageUrl } as ChatMessageInput;
+        }
+        return { role: m.role as 'user' | 'model', content: m.content, imageUrl: m.imageUrl } as ChatMessageInput;
+      });
+
+      startStream(engineMessages, modelMessageId);
+    },
+    [cancel, options, startStream]
+  );
+
+  return { cancel, sendMessage, regenerateMessage, branchFromEdit };
+}

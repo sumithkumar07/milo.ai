@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import { FeatureId } from '../../core/types';
 import { FEATURES } from '../../features/features';
-import { ingestDocument, onRAGStateChange, getRAGState, clearRAG, getIndexedDocumentsInfo } from '../../services/rag/ragEngine';
+import { getModelCaps } from '../../core/modelCaps';
+import { ingestDocument, onRAGStateChange, getRAGState, clearRAG, getIndexedDocumentsInfo, isKeywordFallbackActive } from '../../services/rag/ragEngine';
 
 interface ChatInputProps {
   placeholder?: string;
@@ -25,6 +26,9 @@ interface ChatInputProps {
     openaiKey?: string;
     customBaseUrl?: string;
     customApiKey?: string;
+    geminiModel?: string;
+    openaiModel?: string;
+    customModelName?: string;
   };
 }
 
@@ -42,6 +46,12 @@ export default function ChatInput({
   preferences
 }: ChatInputProps) {
   const feat = activeFeature ? FEATURES[activeFeature] : null;
+  const modelName = preferences?.activeProvider === 'gemini'
+    ? preferences.geminiModel
+    : preferences?.activeProvider === 'openai'
+      ? preferences.openaiModel
+      : preferences?.customModelName || '';
+  const { vision: supportsVision } = getModelCaps(preferences?.activeProvider || 'gemini', modelName);
   const [message, setMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [truncationWarning, setTruncationWarning] = useState<string | null>(null);
@@ -50,6 +60,7 @@ export default function ChatInput({
   const [ragStatus, setRagStatus] = useState<'idle' | 'processing' | 'ready' | 'error'>('idle');
   const [ragProgress, setRagProgress] = useState('');
   const [indexedDocs, setIndexedDocs] = useState<{ name: string; chunks: number }[]>([]);
+  const [keywordFallback, setKeywordFallback] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,6 +68,7 @@ export default function ChatInput({
       setRagStatus(s.status);
       setRagProgress(s.progress);
       setIndexedDocs(getIndexedDocumentsInfo());
+      setKeywordFallback(s.keywordFallbackActive);
     });
     return unsub;
   }, []);
@@ -110,6 +122,12 @@ export default function ChatInput({
         }
       };
       if (file.type.startsWith('image/')) {
+        if (!supportsVision) {
+          setMessage((prev) => prev
+            ? `${prev} [Image "${file.name}" skipped: current model does not support vision]`
+            : `[Image "${file.name}" skipped: current model does not support vision. Switch to a vision-capable model (Gemini, GPT-4o, Claude 3) to use image attachments.]`);
+          return;
+        }
         const reader = new FileReader();
         reader.onload = (e) => {
           const base64 = e.target?.result as string;
@@ -208,6 +226,15 @@ export default function ChatInput({
         <div className="mb-2 mx-4 p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-[11px] text-red-400 flex items-center justify-between gap-2">
           <span>{ragProgress}</span>
           <button onClick={clearRAG} className="text-red-400/60 hover:text-red-400 shrink-0">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+      {keywordFallback && ragStatus === 'ready' && (
+        <div className="mb-2 mx-4 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[11px] text-amber-400 flex items-center gap-2">
+          <FileText className="w-3 h-3 shrink-0" />
+          <span>Embedding API unavailable — using keyword search. Results may be less precise.</span>
+          <button onClick={() => setKeywordFallback(false)} className="text-amber-400/60 hover:text-amber-400 shrink-0 ml-auto">
             <X className="w-3 h-3" />
           </button>
         </div>

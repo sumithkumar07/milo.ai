@@ -243,7 +243,7 @@ export default function SettingsView() {
                   <Search className="w-5 h-5 text-primary" />
                   <h3 className="font-bold">Deep Search</h3>
                 </div>
-                <p className="text-xs text-on-surface-variant leading-relaxed">Choose how MILO searches the web. DuckDuckGo works out of the box — no setup needed.</p>
+                <p className="text-xs text-on-surface-variant leading-relaxed">MILO searches the web via SearXNG (uses public instances by default). Add your own SearXNG URL for faster, more reliable results. DuckDuckGo is available as a fallback.</p>
                 
                 <div className="space-y-4 mt-2">
                   <div className="flex justify-between items-center">
@@ -253,21 +253,21 @@ export default function SettingsView() {
                       onChange={(e) => updatePreferences({ searchBackend: e.target.value as any })}
                       className="bg-surface border border-outline rounded-lg text-xs font-semibold px-3 py-1.5 focus:outline-none focus:border-on-surface-variant cursor-pointer text-on-surface"
                     >
-                      <option value="duckduckgo">DuckDuckGo (No setup)</option>
-                      <option value="searxng">SearXNG (Self-hosted)</option>
+                      <option value="searxng">SearXNG (Default — public instances)</option>
+                      <option value="duckduckgo">DuckDuckGo (Fallback)</option>
                     </select>
                   </div>
                   {preferences.searchBackend === 'searxng' && (
                     <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-2">
-                      <label className="text-[10px] font-bold text-tertiary uppercase tracking-widest">SearXNG Instance URL</label>
+                      <label className="text-[10px] font-bold text-tertiary uppercase tracking-widest">SearXNG Instance URL (Optional)</label>
                       <input 
                         type="text" 
                         value={preferences.searxngUrl}
                         onChange={(e) => updatePreferences({ searxngUrl: e.target.value })}
-                        placeholder="e.g., http://localhost:8080"
+                        placeholder="e.g., http://localhost:8080 (uses public instances if empty)"
                         className="w-full bg-surface-hover border border-outline rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-on-surface-variant" 
                       />
-                      <p className="text-[10px] text-on-surface-variant">Run with: <code className="px-1 py-0.5 bg-surface rounded">docker run -d -p 8080:8080 searxng/searxng</code></p>
+                      <p className="text-[10px] text-on-surface-variant">Leave empty to use public instances. Self-host: <code className="px-1 py-0.5 bg-surface rounded">docker run -d -p 8080:8080 searxng/searxng</code></p>
                     </div>
                   )}
                 </div>

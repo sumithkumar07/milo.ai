@@ -23,6 +23,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json({ limit: '10mb' }));
+  app.set('trust proxy', true);
 
   app.post("/api/proxy", async (req, res) => {
     try {
@@ -32,25 +33,20 @@ async function startServer() {
       }
 
       const { targetUrl, headers, body, method } = req.body;
-      console.log(`[Proxy] ${method || 'POST'} ${targetUrl}`);
+      console.log(`[Proxy Request] ${method || 'POST'} ${targetUrl}`);
       if (!targetUrl) {
         return res.status(400).json({ error: "Missing targetUrl" });
       }
 
-      const allowedHosts = [
-        'api.openai.com',
-        'api.anthropic.com',
-        'en.wikipedia.org',
-        'api.crossref.org',
-        'api.groq.com',
-        'api.together.xyz',
-        'openrouter.ai',
-        'api.fireworks.ai',
-        'integrate.api.nvidia.com',
-        'html.duckduckgo.com',
-        'duckduckgo.com',
-        'localhost'
+      const defaultHosts = [
+        'api.openai.com', 'api.anthropic.com', 'en.wikipedia.org',
+        'api.crossref.org', 'api.groq.com', 'api.together.xyz',
+        'openrouter.ai', 'api.fireworks.ai', 'integrate.api.nvidia.com',
+        'html.duckduckgo.com', 'duckduckgo.com', 'localhost'
       ];
+      const allowedHosts = process.env.MILO_PROXY_ALLOWED_HOSTS
+        ? process.env.MILO_PROXY_ALLOWED_HOSTS.split(',').map(h => h.trim()).filter(Boolean)
+        : defaultHosts;
 
       let parsedUrl: URL;
       try {
@@ -59,7 +55,8 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid targetUrl" });
       }
 
-      if (parsedUrl.protocol !== 'https:') {
+      const allowHttp = process.env.MILO_ALLOW_HTTP === 'true';
+      if (parsedUrl.protocol !== 'https:' && !(allowHttp && parsedUrl.protocol === 'http:')) {
         return res.status(400).json({ error: "Only HTTPS URLs allowed" });
       }
 
@@ -81,34 +78,41 @@ async function startServer() {
 
       res.status(apiRes.status);
 
-      apiRes.headers.forEach((val, key) => {
-        const lower = key.toLowerCase();
-        if (!['content-encoding', 'transfer-encoding', 'connection'].includes(lower)) {
-           res.setHeader(key, val);
-        }
-      });
+      const contentType = apiRes.headers.get('content-type') || '';
+      const contentEncoding = apiRes.headers.get('content-encoding');
+      const isStream = contentType.includes('text/event-stream') || contentType.includes('stream');
 
-      if (apiRes.body) {
-        const reader = apiRes.body.getReader();
-        const pump = async () => {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              res.end();
-              break;
-            }
-            if (value) {
-              res.write(Buffer.from(value));
-            }
+      if (isStream) {
+        apiRes.headers.forEach((val, key) => {
+          const lower = key.toLowerCase();
+          if (!['transfer-encoding', 'connection'].includes(lower)) {
+            res.setHeader(key, val);
           }
-        };
-        pump().catch(err => {
-          console.error("Stream pump error:", err);
-          res.end();
         });
+        if (apiRes.body) {
+          const reader = apiRes.body.getReader();
+          const pump = async () => {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) { res.end(); break; }
+              if (value) res.write(Buffer.from(value));
+            }
+          };
+          pump().catch(err => {
+            console.error("Stream pump error:", err);
+            res.end();
+          });
+        }
       } else {
-        const text = await apiRes.text();
-        res.send(text);
+        const buffer = Buffer.from(await apiRes.arrayBuffer());
+        apiRes.headers.forEach((val, key) => {
+          const lower = key.toLowerCase();
+          if (!['content-encoding', 'transfer-encoding', 'connection', 'content-length'].includes(lower)) {
+            res.setHeader(key, val);
+          }
+        });
+        res.setHeader('Content-Length', buffer.length);
+        res.end(buffer);
       }
     } catch (err: any) {
       console.error("Proxy error:", err);

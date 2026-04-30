@@ -37,7 +37,7 @@ interface AppContextType {
   deleteSession: (id: string) => void;
   clearHistory: () => void;
   addMessage: (message: Message) => void;
-  updateMessage: (id: string, content: string, isStreaming: boolean) => void;
+  updateMessage: (id: string, content: string, isStreaming: boolean, extras?: Partial<Omit<Message, 'id' | 'role' | 'content' | 'isStreaming'>>) => void;
   truncateAfter: (messageId: string) => void;
 
   updateProfile: (profile: Partial<UserProfile>) => void;
@@ -64,7 +64,7 @@ const defaultPreferences: Preferences = {
   geminiModel: 'gemini-2.5-flash',
   openaiModel: 'gpt-4o',
   anthropicModel: 'claude-3-5-sonnet-latest',
-  searchBackend: 'duckduckgo',
+  searchBackend: 'searxng',
   searxngUrl: 'http://localhost:8080'
 };
 
@@ -165,8 +165,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setMessages(prev => [...prev, message]);
   };
 
-  const updateMessage = (id: string, content: string, isStreaming: boolean) => {
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, content, isStreaming } : m));
+  const updateMessage = (id: string, content: string, isStreaming: boolean, extras?: Partial<Omit<Message, 'id' | 'role' | 'content' | 'isStreaming'>>) => {
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, content, isStreaming, ...extras } : m));
   };
 
   const truncateAfter = (messageId: string) => {

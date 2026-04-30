@@ -12,11 +12,11 @@ import SettingsView from '../views/SettingsView';
 import ProfileView from '../views/ProfileView';
 import SubscriptionView from '../views/SubscriptionView';
 import HelpView from '../views/HelpView';
-import { ViewType, FeatureId, Message } from './types';
+import { ViewType, FeatureId } from './types';
 import { AnimatePresence, motion } from 'motion/react';
-import { streamChat } from '../services/llmEngine';
 import { useAppContext } from './store';
-import { retrieveRelevantChunks, hasStoredDocuments, initRAG } from '../services/rag/ragEngine';
+import { useStreamChat } from './useStreamChat';
+import { initRAG } from '../services/rag/ragEngine';
 
 export default function App() {
   const { messages, addMessage, updateMessage, truncateAfter, currentSessionId, preferences } = useAppContext();
@@ -52,13 +52,6 @@ export default function App() {
   }, [activeFeature]);
 
   const [isLoading, setIsLoading] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
 
   useEffect(() => {
     if (preferences.theme === 'light') {
@@ -70,275 +63,43 @@ export default function App() {
     }
   }, [preferences.theme]);
 
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-  };
+  const { cancel, sendMessage, regenerateMessage, branchFromEdit } = useStreamChat({
+    activeFeature,
+    preferences,
+    getMessages: () => messagesRef.current,
+    addMessage: (msg) => {
+      addMessage(msg);
+      if (msg.role === 'user') setView('active-chat');
+    },
+    updateMessage: (id, content, isStreaming, extras) => updateMessage(id, content, isStreaming, extras),
+    setIsLoading,
+  });
 
-  const regenerateMessage = async (messageIndex: number) => {
-    const targetMessage = messagesRef.current[messageIndex];
-    if (!targetMessage || targetMessage.role !== 'model') return;
+  const stopGeneration = () => { cancel(); setIsLoading(false); };
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
-
-    setIsLoading(true);
-
-    const messagesUpToUser = messagesRef.current.slice(0, messageIndex);
-    const modelMessageId = targetMessage.id;
-    updateMessage(modelMessageId, '', true);
-
-    let finalMessages = messagesUpToUser.map(m => ({
-      role: m.role as 'user' | 'model',
-      content: m.content,
-      imageUrl: m.imageUrl
-    }));
-
-    const lastUserMsg = messagesUpToUser.filter(m => m.role === 'user').pop();
-    if (lastUserMsg && hasStoredDocuments()) {
-      try {
-        const retrieved = await retrieveRelevantChunks(lastUserMsg.content, 5, {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-        });
-        if (retrieved.chunks.length > 0) {
-          const context = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}]\n${c.text}`).join('\n\n---\n\n');
-          const enrichedContent = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${context}\n\n---\n\nUser Question: ${lastUserMsg.content}`;
-          finalMessages = finalMessages.map(m =>
-            m.role === 'user' && m.content === lastUserMsg.content
-              ? { ...m, content: enrichedContent }
-              : m
-          );
-        }
-      } catch (err) {
-        console.error('RAG retrieval failed:', err);
-      }
-    }
-
-    try {
-      const engineStream = streamChat(
-        finalMessages,
-        {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          anthropicKey: preferences.anthropicKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-          customModelName: preferences.customModelName,
-          geminiModel: preferences.geminiModel,
-          openaiModel: preferences.openaiModel,
-          anthropicModel: preferences.anthropicModel,
-          searchBackend: preferences.searchBackend,
-          searxngUrl: preferences.searxngUrl
-        },
-        activeFeatureRef.current,
-        abortControllerRef.current.signal
-      );
-
-      let fullText = '';
-      for await (const chunk of await engineStream) {
-        if (chunk) {
-          fullText += chunk;
-          updateMessage(modelMessageId, fullText, true);
-        }
-      }
-      updateMessage(modelMessageId, fullText, false);
-    } catch (error: any) {
-      if (error.message !== "Aborted") {
-        console.error("Regenerate error:", error);
-        updateMessage(modelMessageId, error.message || 'MILO encountered an error. Please try again.', false);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const sendMessage = async (text: string, overrideFeature?: FeatureId, imageUrl?: string) => {
+  const handleSendMessage = async (text: string, overrideFeature?: FeatureId, imageUrl?: string) => {
     if (!text.trim() && !imageUrl) return;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
-
-    let finalText = text;
-    let ragContext = '';
-    if (hasStoredDocuments()) {
-      try {
-        const retrieved = await retrieveRelevantChunks(text, 5, {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-        });
-        if (retrieved.chunks.length > 0) {
-          ragContext = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}]\n${c.text}`).join('\n\n---\n\n');
-          finalText = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${ragContext}\n\n---\n\nUser Question: ${text}`;
-        }
-      } catch (err) {
-        console.error('RAG retrieval failed:', err);
-      }
-    }
-
-    const newMessage: Message = { id: Date.now().toString(), role: 'user', content: text, imageUrl };
-    addMessage(newMessage);
-    setView('active-chat');
-    setIsLoading(true);
-
-    const modelMessageId = (Date.now() + 1).toString();
-    addMessage({ id: modelMessageId, role: 'model', content: '', isStreaming: true });
-
-    try {
-      const messagesForEngine = messagesRef.current.map(m => ({
-        role: m.role as 'user' | 'model',
-        content: m.content,
-        imageUrl: m.imageUrl
-      }));
-      const lastUserIdx = messagesForEngine.length - 1;
-      if (ragContext) {
-        messagesForEngine[lastUserIdx] = { role: 'user' as const, content: finalText, imageUrl };
-      }
-      const engineStream = streamChat(
-        messagesForEngine,
-        {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          anthropicKey: preferences.anthropicKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-          customModelName: preferences.customModelName,
-          geminiModel: preferences.geminiModel,
-          openaiModel: preferences.openaiModel,
-          anthropicModel: preferences.anthropicModel,
-          searchBackend: preferences.searchBackend,
-          searxngUrl: preferences.searxngUrl
-        },
-        overrideFeature || activeFeatureRef.current,
-        abortControllerRef.current.signal
-      );
-
-      let fullText = '';
-      for await (const chunk of await engineStream) {
-        if (chunk) {
-          fullText += chunk;
-          updateMessage(modelMessageId, fullText, true);
-        }
-      }
-      updateMessage(modelMessageId, fullText, false);
-    } catch (error: any) {
-      if (error.message !== "Aborted") {
-        console.error("Chat error:", error);
-        updateMessage(modelMessageId, error.message || 'MILO encountered an error. Please try again.', false);
-      }
-    } finally {
-      setIsLoading(false);
-    }
+    // We need to add the message first so the hook's internal sendMessage can access it
+    // But the hook handles message creation internally
+    // Let's use the hook's sendMessage directly
+    await sendMessage(text, imageUrl, overrideFeature);
   };
 
-  const branchFromEdit = async (messageIndex: number, newContent: string) => {
-    const targetMessage = messagesRef.current[messageIndex];
-    if (!targetMessage || targetMessage.role !== 'user') return;
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
+  const handleRegenerate = async (messageIndex: number) => {
+    await regenerateMessage(messagesRef.current, messageIndex);
+  };
 
-    truncateAfter(targetMessage.id);
-    updateMessage(targetMessage.id, newContent, false);
-
-    let finalText = newContent;
-    if (hasStoredDocuments()) {
-      try {
-        const retrieved = await retrieveRelevantChunks(newContent, 5, {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-        });
-        if (retrieved.chunks.length > 0) {
-          const context = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}]\n${c.text}`).join('\n\n---\n\n');
-          finalText = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${context}\n\n---\n\nUser Question: ${newContent}`;
-        }
-      } catch (err) {
-        console.error('RAG retrieval failed:', err);
-      }
-    }
-
-    setIsLoading(true);
-
-    const modelMessageId = (Date.now() + 1).toString();
-    addMessage({ id: modelMessageId, role: 'model', content: '', isStreaming: true });
-
-    try {
-      const messagesForEngine = messages.slice(0, messageIndex + 1).map((m, idx) => {
-        if (idx === messageIndex) {
-          return {
-            role: m.role as 'user' | 'model',
-            content: finalText,
-            imageUrl: m.imageUrl || targetMessage.imageUrl
-          };
-        }
-        return {
-          role: m.role as 'user' | 'model',
-          content: m.content,
-          imageUrl: m.imageUrl
-        };
-      });
-
-      const engineStream = streamChat(
-        messagesForEngine,
-        {
-          provider: preferences.activeProvider,
-          geminiKey: preferences.geminiKey,
-          openaiKey: preferences.openaiKey,
-          anthropicKey: preferences.anthropicKey,
-          customBaseUrl: preferences.customBaseUrl,
-          customApiKey: preferences.customApiKey,
-          customModelName: preferences.customModelName,
-          geminiModel: preferences.geminiModel,
-          openaiModel: preferences.openaiModel,
-          anthropicModel: preferences.anthropicModel,
-          searchBackend: preferences.searchBackend,
-          searxngUrl: preferences.searxngUrl
-        },
-        activeFeatureRef.current,
-        abortControllerRef.current.signal
-      );
-
-      let fullText = '';
-      for await (const chunk of await engineStream) {
-        if (chunk) {
-          fullText += chunk;
-          updateMessage(modelMessageId, fullText, true);
-        }
-      }
-      updateMessage(modelMessageId, fullText, false);
-    } catch (error: any) {
-      if (error.message !== "Aborted") {
-        console.error("Branch edit error:", error);
-        updateMessage(modelMessageId, error.message || 'MILO encountered an error. Please try again.', false);
-      }
-    } finally {
-      setIsLoading(false);
-    }
+  const handleBranchEdit = async (messageIndex: number, newContent: string) => {
+    truncateAfter(messagesRef.current[messageIndex]?.id);
+    await branchFromEdit(messagesRef.current, messageIndex, newContent);
   };
 
   const renderView = () => {
     switch (view) {
       case 'home':
-        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={sendMessage} />;
+        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={handleSendMessage} />;
       case 'active-chat':
-        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={sendMessage} onStop={stopGeneration} onRegenerate={regenerateMessage} onBranchEdit={branchFromEdit} />;
+        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={handleSendMessage} onStop={stopGeneration} onRegenerate={handleRegenerate} onBranchEdit={handleBranchEdit} />;
       case 'library':
         return <LibraryView
           pinnedFeatures={pinnedFeatures}
@@ -355,7 +116,7 @@ export default function App() {
       case 'profile':
         return <ProfileView />;
       default:
-        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={sendMessage} />;
+        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={handleSendMessage} />;
     }
   };
 

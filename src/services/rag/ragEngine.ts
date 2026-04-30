@@ -13,6 +13,7 @@ export interface RAGState {
   stores: VectorStore[];
   status: 'idle' | 'processing' | 'ready' | 'error';
   progress: string;
+  keywordFallbackActive: boolean;
 }
 
 const DB_NAME = 'milo-rag-db';
@@ -20,7 +21,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'vector-stores';
 
 let db: IDBDatabase | null = null;
-let state: RAGState = { stores: [], status: 'idle', progress: '' };
+let state: RAGState = { stores: [], status: 'idle', progress: '', keywordFallbackActive: false };
 let initPromise: Promise<void> | null = null;
 const listeners: Set<(s: RAGState) => void> = new Set();
 
@@ -123,9 +124,10 @@ export function onRAGStateChange(listener: (s: RAGState) => void) {
 }
 
 export function getRAGState(): RAGState { return { ...state }; }
+export function isKeywordFallbackActive(): boolean { return state.keywordFallbackActive; }
 
 export async function clearRAG() {
-  state = { stores: [], status: 'idle', progress: '' };
+  state = { stores: [], status: 'idle', progress: '', keywordFallbackActive: false };
   await clearPersistedStores();
   notify();
 }
@@ -314,38 +316,62 @@ export async function retrieveRelevantChunks(
   const hasEmbeddings = state.stores.some(s => s.dimensions > 0);
 
   if (!hasEmbeddings) {
+    state.keywordFallbackActive = true;
+    notify();
     return keywordRetrieve(query, topK);
   }
 
-  let queryEmbedding: number[] = [];
-  const firstWithEmbeddings = state.stores.find(s => s.dimensions > 0)!;
+  // Group stores by dimension so we never compare mismatched vectors
+  const dimGroups = new Map<number, VectorStore[]>();
+  for (const store of state.stores) {
+    if (store.dimensions === 0) continue;
+    const group = dimGroups.get(store.dimensions) || [];
+    group.push(store);
+    dimGroups.set(store.dimensions, group);
+  }
 
-  try {
-    const store = firstWithEmbeddings;
-    if (store.embeddings.length > 0 && store.dimensions > 0) {
-      if (store.embeddings[0].length === 768) {
+  // Try each dimension group — pick the first one we can embed for
+  let queryEmbedding: number[] = [];
+  let targetDim = 0;
+
+  for (const [dim, stores] of dimGroups.entries()) {
+    const sample = stores[0].embeddings[0];
+    if (!sample || sample.length !== dim) continue;
+
+    try {
+      if (dim === 768) {
         queryEmbedding = await embedQueryGemini(query, config?.geminiKey || '');
-      } else if (store.embeddings[0].length === 1536) {
+      } else if (dim === 1536 || dim === 3072 || dim === 4096) {
         const apiKey = config?.provider === 'custom' ? config?.customApiKey : config?.openaiKey;
         const baseUrl = config?.provider === 'custom' ? config?.customBaseUrl : undefined;
-        queryEmbedding = await embedQueryOpenAI(query, apiKey || '', baseUrl);
+        queryEmbedding = await embedQueryOpenAI(query, apiKey || '', baseUrl, dim);
       }
+      if (queryEmbedding.length > 0) {
+        targetDim = dim;
+        break;
+      }
+    } catch {
+      continue;
     }
-  } catch {
-    return keywordRetrieve(query, topK);
   }
 
   if (queryEmbedding.length === 0) {
+    state.keywordFallbackActive = true;
+    notify();
     return keywordRetrieve(query, topK);
   }
 
+  state.keywordFallbackActive = false;
+  notify();
+
   const scored: { chunk: TextChunk; score: number }[] = [];
 
-  for (const store of state.stores) {
-    if (store.dimensions === 0) continue;
+  // Only score stores with matching dimension
+  const matchingStores = dimGroups.get(targetDim) || [];
+  for (const store of matchingStores) {
     for (let i = 0; i < store.chunks.length; i++) {
       const emb = store.embeddings[i];
-      if (emb.length !== queryEmbedding.length) continue;
+      if (!emb || emb.length !== targetDim) continue;
       const sim = cosineSimilarity(queryEmbedding, emb);
       scored.push({ chunk: store.chunks[i], score: sim });
     }
@@ -374,7 +400,7 @@ async function embedQueryGemini(query: string, apiKey: string): Promise<number[]
   return [];
 }
 
-async function embedQueryOpenAI(query: string, apiKey: string, baseUrl?: string): Promise<number[]> {
+async function embedQueryOpenAI(query: string, apiKey: string, baseUrl?: string, targetDim?: number): Promise<number[]> {
   if (!apiKey) return [];
   const client = new OpenAI({
     apiKey,
@@ -401,7 +427,8 @@ async function embedQueryOpenAI(query: string, apiKey: string, baseUrl?: string)
       });
     }
   });
-  const model = baseUrl?.includes('nvidia') ? 'nvidia/nv-embed-v1' : 'text-embedding-3-small';
+  const isNvidia = baseUrl?.includes('nvidia');
+  const model = isNvidia ? 'nvidia/nv-embed-v1' : (targetDim === 3072 ? 'text-embedding-3-large' : 'text-embedding-3-small');
   const result = await client.embeddings.create({
     model: model,
     input: query,
