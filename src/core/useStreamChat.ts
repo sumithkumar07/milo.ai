@@ -1,7 +1,7 @@
 import { useRef, useCallback } from 'react';
 import { streamChat, getLastSearchResults } from '../services/llmEngine';
 import { retrieveRelevantChunks, hasStoredDocuments } from '../services/rag/ragEngine';
-import { applySlidingWindow } from '../services/memoryService';
+import { applySlidingWindow, extractFactsFromConversation, addUserFact, archiveSession } from '../services/memoryService';
 import { FeatureId, Message } from './types';
 import { LLMConfig } from '../services/llmEngine';
 
@@ -131,6 +131,7 @@ export function useStreamChat(options: StreamChatOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const conversationSummaryRef = useRef<string>('');
   const summarizingRef = useRef<boolean>(false);
+  const messageCountRef = useRef<number>(0);
 
   const cancel = useCallback(() => {
     if (abortControllerRef.current) {
@@ -213,6 +214,36 @@ export function useStreamChat(options: StreamChatOptions) {
         if (searchStatus.length > 0) extras.searchStatus = searchStatus;
         if (ragSources && ragSources.length > 0) extras.ragSources = ragSources;
         options.updateMessage(modelMessageId, fullText, false, Object.keys(extras).length > 0 ? extras : undefined);
+
+        // Auto-learn: extract user facts every 5 exchanges
+        messageCountRef.current += 1;
+        if (messageCountRef.current % 5 === 0) {
+          const allMsgs = options.getMessages();
+          if (allMsgs.length >= 6) {
+            extractFactsFromConversation(
+              allMsgs.map(m => ({ role: m.role, content: m.content })),
+              {
+                provider: options.preferences.activeProvider,
+                geminiKey: options.preferences.geminiKey,
+                openaiKey: options.preferences.openaiKey,
+                anthropicKey: options.preferences.anthropicKey,
+                customBaseUrl: options.preferences.customBaseUrl,
+                customApiKey: options.preferences.customApiKey,
+                customModelName: options.preferences.customModelName,
+              }
+            ).then(newFacts => {
+              newFacts.forEach(f => addUserFact(f));
+            }).catch(() => {});
+          }
+        }
+
+        // Archive session on completion
+        const sessionId = options.getSessionId();
+        if (sessionId) {
+          const allMsgs = options.getMessages();
+          const title = allMsgs.length > 0 ? allMsgs[0].content.slice(0, 60) : 'Untitled';
+          archiveSession(sessionId, title, allMsgs);
+        }
       } catch (error: any) {
         if (error.message !== 'Aborted') {
           console.error('Chat error:', error);
