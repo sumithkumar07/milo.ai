@@ -295,6 +295,7 @@ async function embedWithOpenAI(chunks: TextChunk[], apiKey: string, baseUrl?: st
 
 export interface RetrievalResult {
   chunks: TextChunk[];
+  sources: string[];
   scores: number[];
 }
 
@@ -310,7 +311,7 @@ export async function retrieveRelevantChunks(
   }
 ): Promise<RetrievalResult> {
   if (state.stores.length === 0) {
-    return { chunks: [], scores: [] };
+    return { chunks: [], sources: [], scores: [] };
   }
 
   const hasEmbeddings = state.stores.some(s => s.dimensions > 0);
@@ -364,7 +365,7 @@ export async function retrieveRelevantChunks(
   state.keywordFallbackActive = false;
   notify();
 
-  const scored: { chunk: TextChunk; score: number }[] = [];
+  const scored: { chunk: TextChunk; source: string; score: number }[] = [];
 
   // Only score stores with matching dimension
   const matchingStores = dimGroups.get(targetDim) || [];
@@ -373,7 +374,7 @@ export async function retrieveRelevantChunks(
       const emb = store.embeddings[i];
       if (!emb || emb.length !== targetDim) continue;
       const sim = cosineSimilarity(queryEmbedding, emb);
-      scored.push({ chunk: store.chunks[i], score: sim });
+      scored.push({ chunk: store.chunks[i], source: store.sourceName, score: sim });
     }
   }
 
@@ -382,6 +383,7 @@ export async function retrieveRelevantChunks(
 
   return {
     chunks: top.map(s => s.chunk),
+    sources: top.map(s => s.source),
     scores: top.map(s => s.score)
   };
 }
@@ -438,13 +440,13 @@ async function embedQueryOpenAI(query: string, apiKey: string, baseUrl?: string,
 
 
 function keywordRetrieve(query: string, topK: number): RetrievalResult {
-  const scored: { chunk: TextChunk; score: number }[] = [];
+  const scored: { chunk: TextChunk; source: string; score: number }[] = [];
 
   for (const store of state.stores) {
     for (const chunk of store.chunks) {
       const score = keywordScore(query, chunk.text);
       if (score > 0) {
-        scored.push({ chunk, score });
+        scored.push({ chunk, source: store.sourceName, score });
       }
     }
   }
@@ -454,10 +456,24 @@ function keywordRetrieve(query: string, topK: number): RetrievalResult {
 
   return {
     chunks: top.map(s => s.chunk),
+    sources: top.map(s => s.source),
     scores: top.map(s => s.score)
   };
 }
 
 export function getIndexedDocumentsInfo(): { name: string; chunks: number }[] {
   return state.stores.map(s => ({ name: s.sourceName, chunks: s.chunks.length }));
+}
+
+export async function deleteDocument(sourceName: string): Promise<void> {
+  const idx = state.stores.findIndex(s => s.sourceName === sourceName);
+  if (idx === -1) return;
+  state.stores.splice(idx, 1);
+  await deletePersistedStore(sourceName);
+  if (state.stores.length === 0) {
+    state.status = 'idle';
+    state.progress = '';
+    state.keywordFallbackActive = false;
+  }
+  notify();
 }

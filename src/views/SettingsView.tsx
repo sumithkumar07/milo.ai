@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Palette, 
   Layers, 
@@ -9,14 +9,33 @@ import {
   Smartphone,
   Eye,
   Key,
-  Database
+  Database,
+  FileText,
+  X
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAppContext } from '../core/store';
+import { getIndexedDocumentsInfo, deleteDocument, clearRAG, onRAGStateChange, getRAGState } from '../services/rag/ragEngine';
 
 export default function SettingsView() {
   const { sessions, clearHistory, preferences, updatePreferences } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
+  const [indexedDocs, setIndexedDocs] = useState<{ name: string; chunks: number }[]>([]);
+  const [ragStatus, setRagStatus] = useState<'idle' | 'processing' | 'ready' | 'error'>('idle');
+  const [ragProgress, setRagProgress] = useState('');
+
+  useEffect(() => {
+    setIndexedDocs(getIndexedDocumentsInfo());
+    const state = getRAGState();
+    setRagStatus(state.status);
+    setRagProgress(state.progress);
+    const unsub = onRAGStateChange((s) => {
+      setIndexedDocs(getIndexedDocumentsInfo());
+      setRagStatus(s.status);
+      setRagProgress(s.progress);
+    });
+    return unsub;
+  }, []);
 
   const recentHistory = sessions.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -271,6 +290,50 @@ export default function SettingsView() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Document Management */}
+              <div className="p-6 rounded-3xl bg-surface/50 backdrop-blur-xl border border-outline space-y-4">
+                <div className="flex items-center gap-3">
+                  <Database className="w-5 h-5 text-tertiary" />
+                  <h3 className="font-bold">Indexed Documents</h3>
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">Documents uploaded via chat are indexed for semantic search. Manage or remove them below.</p>
+                
+                {indexedDocs.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-on-surface-variant/60">
+                    <FileText className="w-6 h-6 mx-auto mb-2 opacity-40" />
+                    No documents indexed. Attach files in chat to get started.
+                  </div>
+                ) : (
+                  <div className="space-y-2 mt-2">
+                    {indexedDocs.map((doc, i) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline/50 group">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <FileText className="w-4 h-4 text-tertiary shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium truncate">{doc.name}</div>
+                            <div className="text-[10px] text-on-surface-variant/60">{doc.chunks} chunks indexed</div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteDocument(doc.name)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-on-surface-variant hover:text-red-400 transition-all"
+                          title={`Remove ${doc.name}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={clearRAG}
+                      className="w-full mt-2 py-2.5 flex items-center justify-center gap-2 border border-red-500/20 text-red-500/60 hover:bg-red-500/10 hover:text-red-500 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Clear All Documents
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Privacy & Data */}

@@ -52,9 +52,10 @@ interface ChatMessageInput {
 async function enrichWithRAG(
   text: string,
   preferences: StreamChatOptions['preferences']
-): Promise<{ finalText: string; ragContext: string }> {
+): Promise<{ finalText: string; ragContext: string; ragSources: { name: string; chunkIndex: number; score?: number }[] }> {
   let finalText = text;
   let ragContext = '';
+  const ragSources: { name: string; chunkIndex: number; score?: number }[] = [];
   if (hasStoredDocuments()) {
     try {
       const retrieved = await retrieveRelevantChunks(text, 5, {
@@ -65,14 +66,15 @@ async function enrichWithRAG(
         customApiKey: preferences.customApiKey,
       });
       if (retrieved.chunks.length > 0) {
-        ragContext = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}]\n${c.text}`).join('\n\n---\n\n');
+        ragContext = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}] (${retrieved.sources[i] || 'document'})\n${c.text}`).join('\n\n---\n\n');
+        ragSources.push(...retrieved.chunks.map((c, i) => ({ name: retrieved.sources[i] || 'unknown', chunkIndex: c.index, score: retrieved.scores[i] })));
         finalText = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${ragContext}\n\n---\n\nUser Question: ${text}`;
       }
     } catch (err) {
       console.error('RAG retrieval failed:', err);
     }
   }
-  return { finalText, ragContext };
+  return { finalText, ragContext, ragSources };
 }
 
 function buildEngineMessages(
@@ -133,7 +135,8 @@ export function useStreamChat(options: StreamChatOptions) {
     async (
       messages: ChatMessageInput[],
       modelMessageId: string,
-      featureOverride?: FeatureId
+      featureOverride?: FeatureId,
+      ragSources?: { name: string; chunkIndex: number; score?: number }[]
     ) => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -154,6 +157,7 @@ export function useStreamChat(options: StreamChatOptions) {
         const extras: Partial<Message> = {};
         if (searchResults.length > 0) extras.searchResults = searchResults;
         if (searchStatus.length > 0) extras.searchStatus = searchStatus;
+        if (ragSources && ragSources.length > 0) extras.ragSources = ragSources;
         options.updateMessage(modelMessageId, fullText, false, Object.keys(extras).length > 0 ? extras : undefined);
       } catch (error: any) {
         if (error.message !== 'Aborted') {
@@ -172,7 +176,7 @@ export function useStreamChat(options: StreamChatOptions) {
       if (!text.trim() && !imageUrl) return;
       cancel();
 
-      const { finalText } = await enrichWithRAG(text, options.preferences);
+      const { finalText, ragSources } = await enrichWithRAG(text, options.preferences);
       const newMessage: Message = { id: Date.now().toString(), role: 'user', content: text, imageUrl };
       options.addMessage(newMessage);
 
@@ -189,7 +193,7 @@ export function useStreamChat(options: StreamChatOptions) {
         { role: 'user' as const, content: finalText, imageUrl }
       ];
 
-      startStream(engineMessages, modelMessageId, overrideFeature);
+      startStream(engineMessages, modelMessageId, overrideFeature, ragSources);
     },
     [cancel, options, startStream]
   );
@@ -202,7 +206,7 @@ export function useStreamChat(options: StreamChatOptions) {
 
       const messagesUpToUser = history.slice(0, messageIndex);
       const lastUserMsg = messagesUpToUser.filter(m => m.role === 'user').pop();
-      const { finalText } = lastUserMsg ? await enrichWithRAG(lastUserMsg.content, options.preferences) : { finalText: '' };
+      const { finalText, ragSources } = lastUserMsg ? await enrichWithRAG(lastUserMsg.content, options.preferences) : { finalText: '', ragSources: [] };
 
       options.updateMessage(targetMessage.id, '', true);
 
@@ -212,7 +216,7 @@ export function useStreamChat(options: StreamChatOptions) {
         return mapped;
       });
 
-      startStream(engineMessages, targetMessage.id);
+      startStream(engineMessages, targetMessage.id, undefined, ragSources);
     },
     [cancel, options, startStream]
   );
@@ -223,7 +227,7 @@ export function useStreamChat(options: StreamChatOptions) {
       if (!targetMessage || targetMessage.role !== 'user') return;
       cancel();
 
-      const { finalText } = await enrichWithRAG(newContent, options.preferences);
+      const { finalText, ragSources } = await enrichWithRAG(newContent, options.preferences);
       options.updateMessage(targetMessage.id, newContent, false);
 
       const modelMessageId = (Date.now() + 1).toString();
@@ -236,7 +240,7 @@ export function useStreamChat(options: StreamChatOptions) {
         return { role: m.role as 'user' | 'model', content: m.content, imageUrl: m.imageUrl } as ChatMessageInput;
       });
 
-      startStream(engineMessages, modelMessageId);
+      startStream(engineMessages, modelMessageId, undefined, ragSources);
     },
     [cancel, options, startStream]
   );

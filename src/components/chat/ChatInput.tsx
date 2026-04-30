@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Paperclip,
   Mic,
@@ -6,12 +6,13 @@ import {
   Square,
   X,
   FileText,
-  Loader2
+  Loader2,
+  Upload
 } from 'lucide-react';
 import { FeatureId } from '../../core/types';
 import { FEATURES } from '../../features/features';
 import { getModelCaps } from '../../core/modelCaps';
-import { ingestDocument, onRAGStateChange, getRAGState, clearRAG, getIndexedDocumentsInfo, isKeywordFallbackActive } from '../../services/rag/ragEngine';
+import { ingestDocument, onRAGStateChange, getRAGState, clearRAG, getIndexedDocumentsInfo, isKeywordFallbackActive, deleteDocument } from '../../services/rag/ragEngine';
 
 interface ChatInputProps {
   placeholder?: string;
@@ -61,6 +62,7 @@ export default function ChatInput({
   const [ragProgress, setRagProgress] = useState('');
   const [indexedDocs, setIndexedDocs] = useState<{ name: string; chunks: number }[]>([]);
   const [keywordFallback, setKeywordFallback] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -73,6 +75,126 @@ export default function ChatInput({
     return unsub;
   }, []);
 
+  const processFile = async (file: File) => {
+    const extractText = async (): Promise<string | null> => {
+      try {
+        if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.js') || file.name.endsWith('.ts')) {
+          return await file.text();
+        }
+        if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let text = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            setRagProgress(`Extracting page ${i}/${pdf.numPages} from ${file.name}...`);
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map((item: any) => item.str).join(' ') + '\n';
+          }
+          return text;
+        }
+        if (file.name.endsWith('.docx')) {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          return result.value;
+        }
+        if (file.name.endsWith('.csv') || file.type === 'text/csv') {
+          return await file.text();
+        }
+        return null;
+      } catch (err) {
+        console.error('Failed to extract text from file:', err);
+        return null;
+      }
+    };
+
+    if (file.type.startsWith('image/')) {
+      if (!supportsVision) {
+        setMessage((prev) => prev
+          ? `${prev} [Image "${file.name}" skipped: current model does not support vision]`
+          : `[Image "${file.name}" skipped: current model does not support vision. Switch to a vision-capable model (Gemini, GPT-4o, Claude 3) to use image attachments.]`);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target?.result as string;
+        setSelectedImage(base64);
+        setSelectedImageName(file.name);
+      };
+      reader.onerror = () => {
+        setMessage((prev) => prev ? `${prev} [Failed to load image: ${file.name}]` : `[Failed to load image: ${file.name}]`);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    const text = await extractText();
+    if (!text) {
+      setMessage((prev) => prev ? `${prev} [Attached file: ${file.name}]` : `[Attached file: ${file.name}]`);
+      return;
+    }
+
+    if (text.length > 5000) {
+      setRagStatus('processing');
+      setRagProgress(`Processing ${file.name} (${(text.length / 1000).toFixed(1)}K chars)...`);
+      try {
+        await ingestDocument(text, file.name, {
+          provider: preferences?.activeProvider || 'gemini',
+          geminiKey: preferences?.geminiKey,
+          openaiKey: preferences?.openaiKey,
+          customBaseUrl: preferences?.customBaseUrl,
+          customApiKey: preferences?.customApiKey,
+        });
+        setMessage((prev) => prev + (prev ? '\n' : '') + `[📚 ${file.name} indexed for RAG — ask questions about its content]`);
+      } catch (err: any) {
+        setRagStatus('error');
+        setRagProgress(`Failed: ${err.message}`);
+        setMessage((prev) => prev ? `${prev} [Failed to index ${file.name}]` : `[Failed to index ${file.name}]`);
+      }
+    } else {
+      const fileContext = `\n\n--- Start of ${file.name} ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n`;
+      setMessage((prev) => prev ? `${prev}${fileContext}` : fileContext);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      e.target.value = '';
+      await processFile(file);
+    }
+  };
+
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragIn = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setDragActive(true);
+    }
+  }, []);
+
+  const handleDragOut = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      for (const file of Array.from(e.dataTransfer.files)) {
+        await processFile(file);
+      }
+    }
+  }, [preferences, supportsVision]);
+
   const handleSend = () => {
     if ((message.trim() || selectedImage) && onSend) {
       onSend(message, selectedImage || undefined);
@@ -84,90 +206,6 @@ export default function ChatInput({
 
   const handleAttachment = () => {
     fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      // Reset input to allow re-selecting the same file
-      e.target.value = '';
-      const extractText = async (): Promise<string | null> => {
-        try {
-          if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.js') || file.name.endsWith('.ts')) {
-            return await file.text();
-          }
-          if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            let text = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const content = await page.getTextContent();
-              text += content.items.map((item: any) => item.str).join(' ') + '\n';
-            }
-            return text;
-          }
-          if (file.name.endsWith('.docx')) {
-            const arrayBuffer = await file.arrayBuffer();
-            const result = await mammoth.extractRawText({ arrayBuffer });
-            return result.value;
-          }
-          if (file.name.endsWith('.csv') || file.type === 'text/csv') {
-            return await file.text();
-          }
-          return null;
-        } catch (err) {
-          console.error('Failed to extract text from file:', err);
-          return null;
-        }
-      };
-      if (file.type.startsWith('image/')) {
-        if (!supportsVision) {
-          setMessage((prev) => prev
-            ? `${prev} [Image "${file.name}" skipped: current model does not support vision]`
-            : `[Image "${file.name}" skipped: current model does not support vision. Switch to a vision-capable model (Gemini, GPT-4o, Claude 3) to use image attachments.]`);
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const base64 = e.target?.result as string;
-          setSelectedImage(base64);
-          setSelectedImageName(file.name);
-        };
-        reader.onerror = () => {
-          setMessage((prev) => prev ? `${prev} [Failed to load image: ${file.name}]` : `[Failed to load image: ${file.name}]`);
-        };
-        reader.readAsDataURL(file);
-        return;
-      }
-      const text = await extractText();
-      if (!text) {
-        setMessage((prev) => prev ? `${prev} [Attached file: ${file.name}]` : `[Attached file: ${file.name}]`);
-        return;
-      }
-
-      if (text.length > 5000) {
-        setRagStatus('processing');
-        setRagProgress(`Processing ${file.name} (${(text.length / 1000).toFixed(1)}K chars)...`);
-        try {
-          await ingestDocument(text, file.name, {
-            provider: preferences?.activeProvider || 'gemini',
-            geminiKey: preferences?.geminiKey,
-            openaiKey: preferences?.openaiKey,
-            customBaseUrl: preferences?.customBaseUrl,
-            customApiKey: preferences?.customApiKey,
-          });
-          setMessage((prev) => prev + (prev ? '\n' : '') + `[📚 ${file.name} indexed for RAG — ask questions about its content]`);
-        } catch (err: any) {
-          setRagStatus('error');
-          setRagProgress(`Failed: ${err.message}`);
-          setMessage((prev) => prev ? `${prev} [Failed to index ${file.name}]` : `[Failed to index ${file.name}]`);
-        }
-      } else {
-        const fileContext = `\n\n--- Start of ${file.name} ---\n${text.slice(0, 50000)}\n--- End of ${file.name} ---\n`;
-        setMessage((prev) => prev ? `${prev}${fileContext}` : fileContext);
-      }
-    }
   };
 
   const handleMic = () => {
@@ -197,7 +235,22 @@ export default function ChatInput({
   };
 
   return (
-    <div className="w-full max-w-[800px] mx-auto px-4">
+    <div
+      className="w-full max-w-[800px] mx-auto px-4"
+      onDragEnter={handleDragIn}
+      onDragLeave={handleDragOut}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
+      {dragActive && (
+        <div className="fixed inset-0 z-[100] bg-primary/10 backdrop-blur-sm flex items-center justify-center border-4 border-dashed border-primary m-4 rounded-3xl">
+          <div className="flex flex-col items-center gap-3 text-primary">
+            <Upload className="w-12 h-12" />
+            <span className="text-lg font-bold">Drop files to index</span>
+            <span className="text-xs text-primary/70">PDF, DOCX, TXT, MD, CSV, Images</span>
+          </div>
+        </div>
+      )}
       {ragStatus === 'processing' && (
         <div className="mb-2 mx-4 p-2 bg-primary/10 border border-primary/30 rounded-lg flex items-center gap-2 text-[11px] text-primary">
           <Loader2 className="w-3 h-3 animate-spin" />
@@ -206,18 +259,25 @@ export default function ChatInput({
       )}
       {ragStatus === 'ready' && indexedDocs.length > 0 && (
         <div className="mb-2 mx-4 p-2 bg-green-500/10 border border-green-500/30 rounded-lg text-[11px] text-green-400">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-1">
             <FileText className="w-3 h-3" />
             <span>Indexed documents:</span>
           </div>
-          <div className="flex flex-wrap gap-1 mt-1">
+          <div className="flex flex-wrap gap-1">
             {indexedDocs.map((doc, i) => (
-              <span key={i} className="px-2 py-0.5 bg-green-500/20 rounded-full text-[10px]">
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-500/20 rounded-full text-[10px]">
                 {doc.name} ({doc.chunks} chunks)
+                <button
+                  onClick={() => deleteDocument(doc.name)}
+                  className="ml-0.5 text-green-400/60 hover:text-red-400 transition-colors"
+                  title={`Remove ${doc.name}`}
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
               </span>
             ))}
             <button onClick={clearRAG} className="px-2 py-0.5 hover:bg-red-500/20 hover:text-red-400 rounded-full text-[10px] transition-colors">
-              Clear
+              Clear all
             </button>
           </div>
         </div>
