@@ -66,9 +66,14 @@ async function startServer() {
       }
 
       const fetchHeaders: any = { ...headers };
+      // Standard browser User-Agent to avoid blocks
+      fetchHeaders['user-agent'] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
       delete fetchHeaders['host'];
       delete fetchHeaders['origin'];
       delete fetchHeaders['referer'];
+      
+      // Ensure we don't send accept-encoding that Node fetch can't handle or that would break piping
+      delete fetchHeaders['accept-encoding'];
 
       const apiRes = await fetch(targetUrl, {
         method: method || "POST",
@@ -79,16 +84,17 @@ async function startServer() {
       res.status(apiRes.status);
 
       const contentType = apiRes.headers.get('content-type') || '';
-      const contentEncoding = apiRes.headers.get('content-encoding');
       const isStream = contentType.includes('text/event-stream') || contentType.includes('stream');
 
+      // Forward headers but skip those that conflict with our response
+      apiRes.headers.forEach((val, key) => {
+        const lower = key.toLowerCase();
+        if (!['transfer-encoding', 'connection', 'content-encoding', 'content-length'].includes(lower)) {
+          res.setHeader(key, val);
+        }
+      });
+
       if (isStream) {
-        apiRes.headers.forEach((val, key) => {
-          const lower = key.toLowerCase();
-          if (!['transfer-encoding', 'connection'].includes(lower)) {
-            res.setHeader(key, val);
-          }
-        });
         if (apiRes.body) {
           const reader = apiRes.body.getReader();
           const pump = async () => {
@@ -105,12 +111,6 @@ async function startServer() {
         }
       } else {
         const buffer = Buffer.from(await apiRes.arrayBuffer());
-        apiRes.headers.forEach((val, key) => {
-          const lower = key.toLowerCase();
-          if (!['content-encoding', 'transfer-encoding', 'connection', 'content-length'].includes(lower)) {
-            res.setHeader(key, val);
-          }
-        });
         res.setHeader('Content-Length', buffer.length);
         res.end(buffer);
       }

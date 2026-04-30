@@ -98,16 +98,26 @@ async function consumeStream(
   feature: FeatureId | null,
   signal: AbortSignal,
   onUpdate: (id: string, text: string, streaming: boolean, extras?: Partial<Message>) => void
-): Promise<{ fullText: string }> {
+): Promise<{ fullText: string; searchStatus: string[] }> {
   const engineStream = streamChat(messages, config, feature, signal);
   let fullText = '';
+  const searchStatus: string[] = [];
+  const statusPattern = /<!--SEARCH_STATUS:(.*?)-->/g;
+
   for await (const chunk of engineStream) {
     if (chunk) {
-      fullText += chunk;
-      onUpdate('', fullText, true);
+      let processed = chunk;
+      let match;
+      while ((match = statusPattern.exec(chunk)) !== null) {
+        searchStatus.push(match[1]);
+        processed = processed.replace(match[0], '');
+      }
+      statusPattern.lastIndex = 0;
+      fullText += processed;
+      onUpdate('', fullText, true, searchStatus.length > 0 ? { searchStatus: [...searchStatus] } : undefined);
     }
   }
-  return { fullText };
+  return { fullText, searchStatus };
 }
 
 export function useStreamChat(options: StreamChatOptions) {
@@ -132,15 +142,19 @@ export function useStreamChat(options: StreamChatOptions) {
       options.setIsLoading(true);
 
       try {
-        const { fullText } = await consumeStream(
+        const { fullText, searchStatus } = await consumeStream(
           messages,
           prefsToConfig(options.preferences),
           featureOverride ?? options.activeFeature,
           abortControllerRef.current.signal,
           (_id, text, streaming, extras) => options.updateMessage(modelMessageId, text, streaming, extras)
         );
-        const searchResults = (featureOverride ?? options.activeFeature) === 'deep-search' ? getLastSearchResults() : [];
-        options.updateMessage(modelMessageId, fullText, false, searchResults.length > 0 ? { searchResults } : undefined);
+        const feature = featureOverride ?? options.activeFeature;
+        const searchResults = feature === 'deep-search' ? getLastSearchResults() : [];
+        const extras: Partial<Message> = {};
+        if (searchResults.length > 0) extras.searchResults = searchResults;
+        if (searchStatus.length > 0) extras.searchStatus = searchStatus;
+        options.updateMessage(modelMessageId, fullText, false, Object.keys(extras).length > 0 ? extras : undefined);
       } catch (error: any) {
         if (error.message !== 'Aborted') {
           console.error('Chat error:', error);
@@ -165,13 +179,15 @@ export function useStreamChat(options: StreamChatOptions) {
       const modelMessageId = (Date.now() + 1).toString();
       options.addMessage({ id: modelMessageId, role: 'model', content: '', isStreaming: true });
 
-      const history = options.getMessages();
-      const engineMessages: ChatMessageInput[] = history.map(m => ({
-        role: m.role as 'user' | 'model',
-        content: m.content,
-        imageUrl: m.imageUrl
-      }));
-      engineMessages[engineMessages.length - 1] = { role: 'user' as const, content: finalText, imageUrl };
+      const currentMessages = options.getMessages();
+      const engineMessages: ChatMessageInput[] = [
+        ...currentMessages.map(m => ({
+          role: m.role as 'user' | 'model',
+          content: m.content,
+          imageUrl: m.imageUrl
+        })),
+        { role: 'user' as const, content: finalText, imageUrl }
+      ];
 
       startStream(engineMessages, modelMessageId, overrideFeature);
     },

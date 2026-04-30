@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useAppContext } from '../core/store';
-import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch } from 'lucide-react';
+import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch, ChevronDown, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatInput from '../components/chat/ChatInput';
 import { FeatureId, Message } from '../core/types';
@@ -208,6 +208,7 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [branchedAfterIdx, setBranchedAfterIdx] = useState<number | null>(null);
+  const [expandedSearchStatus, setExpandedSearchStatus] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const unsub = onPyodideStateChange((state, progress) => {
@@ -216,6 +217,15 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
     });
     return unsub;
   }, []);
+
+  const toggleSearchStatus = (id: string) => {
+    setExpandedSearchStatus(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -351,6 +361,37 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
                       <div className="h-3.5 bg-outline rounded-full w-full animate-pulse" />
                       <div className="h-3.5 bg-outline rounded-full w-[94%] animate-pulse" />
                       <div className="h-3.5 bg-outline rounded-full w-[80%] animate-pulse" />
+                    </div>
+                  )}
+                  {message.searchStatus && message.searchStatus.length > 0 && (
+                    <div className="mb-3 border border-primary/20 rounded-xl overflow-hidden bg-primary/5">
+                      <button
+                        onClick={() => toggleSearchStatus(message.id)}
+                        className="w-full px-3 py-2 flex items-center gap-2 text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        {expandedSearchStatus.has(message.id) ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Search Progress ({message.searchStatus.length} steps)
+                      </button>
+                      <AnimatePresence>
+                        {expandedSearchStatus.has(message.id) && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-3 pb-2 space-y-1">
+                              {message.searchStatus.map((status, i) => (
+                                <div key={i} className="flex items-start gap-2 text-[10px] text-on-surface-variant">
+                                  <span className="text-primary/60 mt-px">{i === message.searchStatus.length - 1 ? '●' : '○'}</span>
+                                  <span className={i === message.searchStatus.length - 1 ? 'text-on-surface' : ''}>{status}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )}
                   {message.content && (

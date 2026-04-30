@@ -22,7 +22,7 @@ export interface LLMConfig {
 
 const FEATURE_PROMPTS: Record<FeatureId, string> = {
   'deep-search': `You are MILO Deep Search Engine. Explore the topic exhaustively. Break down complex subjects into structured, detailed analysis. Provide pros/cons, historical context, and future outlooks. You have been provided with live web search results below — use them to ground your response. Cite sources using [1], [2], [3] markers inline when referencing specific facts from the search data.`,
-  'code-gen': `You are MILO Code Engine. Provide expert-level, production-ready code. When the user asks for Python code that can be executed, always provide it in a \`\`\`python code block. Include all necessary imports. Use print() for output instead of returning values. For data visualization, use matplotlib and call plt.show() to display plots. Keep code self-contained and runnable. Include brief explanations before code blocks.`,
+  'code-gen': `You are MILO Code Engine. Provide expert-level, production-ready code. When the user asks for Python code that can be executed, always provide it in a \`\`\`python code block. Include all necessary imports. Use print() for output instead of returning values. For data visualization, use matplotlib and call plt.show() ONLY if the user specifically requests a plot or visualization. Keep code self-contained and runnable. Include brief explanations before code blocks.`,
   'doc-analysis': `You are MILO Document Analyzer. Extract key insights, summarize core arguments, and highlight important metrics or quotes from the user's input. Structure your response with headings, bullet points, and an executive summary.`
 };
 
@@ -165,6 +165,231 @@ function formatResults(results: SearchResult[]): string {
   ).join('\n\n');
 }
 
+// ─── Search Cache ─────────────────────────────────────────────────────
+const CACHE_TTL = 3_600_000; // 1 hour
+
+interface CacheEntry {
+  results: SearchResult[];
+  fetchedContent: string;
+  timestamp: number;
+}
+
+function getCached(query: string): CacheEntry | null {
+  try {
+    const raw = localStorage.getItem(`milo_search_${hashStr(query)}`);
+    if (!raw) return null;
+    const entry: CacheEntry = JSON.parse(raw);
+    if (Date.now() - entry.timestamp > CACHE_TTL) {
+      localStorage.removeItem(`milo_search_${hashStr(query)}`);
+      return null;
+    }
+    return entry;
+  } catch { return null; }
+}
+
+function setCache(query: string, results: SearchResult[], fetchedContent: string) {
+  try {
+    localStorage.setItem(`milo_search_${hashStr(query)}`, JSON.stringify({ results, fetchedContent, timestamp: Date.now() }));
+  } catch {}
+}
+
+function hashStr(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return h.toString(36);
+}
+
+// ─── Query Filter Parsing ─────────────────────────────────────────────
+interface ParsedQuery {
+  coreQuery: string;
+  siteFilter: string;
+  dateFilter?: { after?: string; before?: string };
+}
+
+function parseQuery(raw: string): ParsedQuery {
+  let core = raw;
+  let site = '';
+  let after: string | undefined;
+  let before: string | undefined;
+
+  const siteMatch = core.match(/site:(\S+)/i);
+  if (siteMatch) {
+    site = siteMatch[1];
+    core = core.replace(siteMatch[0], '').trim();
+  }
+  const afterMatch = core.match(/after:(\d{4}-?\d{0,2}-?\d{0,2})/i);
+  if (afterMatch) {
+    after = afterMatch[1].replace(/-/g, '');
+    core = core.replace(afterMatch[0], '').trim();
+  }
+  const beforeMatch = core.match(/before:(\d{4}-?\d{0,2}-?\d{0,2})/i);
+  if (beforeMatch) {
+    before = beforeMatch[1].replace(/-/g, '');
+    core = core.replace(beforeMatch[0], '').trim();
+  }
+  return { coreQuery: core || raw, siteFilter: site, dateFilter: after || before ? { after, before } : undefined };
+}
+
+function buildEngineQuery(parsed: ParsedQuery, backend: string): string {
+  let q = parsed.coreQuery;
+  if (parsed.siteFilter && backend !== 'unsearch') q = `site:${parsed.siteFilter} ${q}`;
+  return q;
+}
+
+// ─── BM25 Re-ranking ──────────────────────────────────────────────────
+function bm25Rank(query: string, results: SearchResult[]): SearchResult[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  if (terms.length === 0) return results;
+  const k1 = 1.2, b = 0.75;
+  const avgLen = results.reduce((s, r) => s + (r.title + ' ' + r.snippet).length, 0) / (results.length || 1);
+  const scored = results.map(r => {
+    const text = (r.title + ' ' + r.snippet).toLowerCase();
+    const len = text.length;
+    let score = 0;
+    for (const term of terms) {
+      const freq = (text.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      const idf = Math.log((results.length + 1) / Math.max(1, results.filter(rr => (rr.title + ' ' + rr.snippet).toLowerCase().includes(term)).length) + 0.5) + 0.5;
+      score += idf * (freq * (k1 + 1)) / (freq + k1 * (1 - b + b * (len / avgLen)));
+    }
+    return { ...r, _bm25: score };
+  });
+  scored.sort((a, b) => (b as any)._bm25 - (a as any)._bm25);
+  return scored.map(({ _bm25, ...r }) => r);
+}
+
+// ─── Follow-up Query Generation ───────────────────────────────────────
+function generateFollowUpQueries(originalQuery: string, existingResults: SearchResult[], round: number): string {
+  // Extract key terms from existing results to find gaps
+  const allText = existingResults.map(r => r.title + ' ' + r.snippet).join(' ').toLowerCase();
+  const coreTerms = originalQuery.toLowerCase().split(/\s+/).filter(t => t.length > 3);
+  
+  // Identify angles already covered
+  const coveredAngles = {
+    comparison: /vs|versus|compare|comparison|difference|better/i.test(allText),
+    pros: /pros|advantages|benefits|strengths/i.test(allText),
+    cons: /cons|disadvantages|drawbacks|limitations|issues/i.test(allText),
+    tutorial: /how to|guide|tutorial|steps|setup|install/i.test(allText),
+    pricing: /price|cost|free|pricing|plan|subscription/i.test(allText),
+    alternatives: /alternative|similar|competitor|vs |replace/i.test(allText),
+    latest: /2025|2026|latest|recent|new|update/i.test(allText),
+    technical: /api|sdk|integration|code|implement|develop/i.test(allText),
+  };
+
+  const topic = coreTerms.slice(0, 3).join(' ');
+  if (!topic) return originalQuery;
+
+  // Generate a follow-up targeting uncovered angles
+  if (round === 2) {
+    if (!coveredAngles.comparison && !coveredAngles.alternatives) return `${topic} vs alternatives comparison`;
+    if (!coveredAngles.pros && !coveredAngles.cons) return `${topic} pros cons disadvantages`;
+    if (!coveredAngles.latest) return `${topic} latest updates 2025 2026`;
+    if (!coveredAngles.technical) return `${topic} technical implementation guide`;
+    return `${topic} in-depth analysis review`;
+  }
+
+  // Round 3: deepest angle
+  if (!coveredAngles.pricing) return `${topic} pricing cost options`;
+  if (!coveredAngles.tutorial) return `how to use ${topic} step by step`;
+  if (!coveredAngles.technical) return `${topic} architecture how it works`;
+  return `${topic} expert opinion insights`;
+}
+
+// ─── Multi-turn Agent Search Loop ─────────────────────────────────────
+export async function* performDeepSearch(
+  query: string,
+  backend: 'duckduckgo' | 'searxng' | 'unsearch',
+  searxngUrl?: string,
+  signal?: AbortSignal
+): AsyncGenerator<{ type: 'status' | 'search' | 'followup' | 'done'; message: string; results?: SearchResult[]; fetchedContent?: string }, void, unknown> {
+  const parsed = parseQuery(query);
+  const maxRounds = 3;
+  const allResults: SearchResult[] = [];
+  const seenUrls = new Set<string>();
+  let finalContent = '';
+
+  for (let round = 1; round <= maxRounds; round++) {
+    if (signal?.aborted) return;
+
+    // Use original query for round 1, intelligent follow-ups for rounds 2-3
+    const roundQuery = round === 1
+      ? buildEngineQuery(parsed, backend)
+      : generateFollowUpQueries(parsed.coreQuery, allResults, round);
+
+    const cacheKey = `${roundQuery}|round${round}`;
+    const cached = getCached(cacheKey);
+
+    if (cached) {
+      yield { type: 'followup', message: `♻️ Cache hit — loaded ${cached.results.length} results for "${roundQuery}"` };
+      for (const r of cached.results) {
+        if (!seenUrls.has(r.url)) { seenUrls.add(r.url); allResults.push(r); }
+      }
+      finalContent += cached.fetchedContent;
+    } else {
+      const roundLabel = round === 1 ? '🔍' : round === 2 ? '🔄' : '🔎';
+      const statusType = round === 1 ? 'search' : 'followup';
+      yield { type: statusType, message: `${roundLabel} Round ${round}: "${roundQuery}"` };
+
+      let roundResults: SearchResult[] = [];
+      if (backend === 'searxng') {
+        const res = await searchSearXNGWithRetry(roundQuery, searxngUrl);
+        roundResults = res.results;
+        if (roundResults.length === 0) roundResults = await searchDuckDuckGo(roundQuery);
+        if (roundResults.length === 0) roundResults = await searchWikipedia(roundQuery);
+      } else if (backend === 'duckduckgo') {
+        roundResults = await searchDuckDuckGo(roundQuery);
+        if (roundResults.length === 0) {
+          const res = await searchSearXNGWithRetry(roundQuery);
+          roundResults = res.results;
+        }
+        if (roundResults.length === 0) roundResults = await searchWikipedia(roundQuery);
+      } else {
+        roundResults = await searchWikipedia(roundQuery);
+      }
+
+      // Deduplicate against previous rounds
+      const newResults = roundResults.filter(r => !seenUrls.has(r.url));
+      if (newResults.length === 0 && round > 1) {
+        yield { type: 'status', message: `⏭️ Round ${round}: No new results — stopping early` };
+        break;
+      }
+
+      for (const r of newResults) { seenUrls.add(r.url); allResults.push(r); }
+      const resultMsg = round === 1
+        ? `✅ Round ${round}: +${newResults.length} new results (${allResults.length} total)`
+        : `✅ Round ${round}: +${newResults.length} from "${roundQuery}" (${allResults.length} total)`;
+      yield { type: 'status', message: resultMsg };
+
+      // Fetch content for new round results (up to 3)
+      const topFetch = newResults.slice(0, 3);
+      if (topFetch.length > 0 && round < maxRounds) {
+        yield { type: 'status', message: `📄 Reading ${topFetch.length} pages...` };
+        const contents = await Promise.all(topFetch.map(async r => {
+          const content = await fetchUrlContent(r.url);
+          return { url: r.url, content };
+        }));
+        for (const c of contents) {
+          if (c.content) {
+            finalContent += `\n--- Content (${c.url}) ---\n${c.content.slice(0, 4000)}\n`;
+          }
+        }
+      }
+
+      setCache(cacheKey, newResults, finalContent);
+    }
+
+    // Check if we have enough results
+    if (allResults.length >= 12 && round < maxRounds) break;
+  }
+
+  if (signal?.aborted) return;
+
+  // BM25 re-rank all results
+  const ranked = bm25Rank(parsed.coreQuery, allResults);
+  const topRanked = ranked.slice(0, 10);
+
+  yield { type: 'done', message: `📊 Re-ranked ${allResults.length} results, using top ${topRanked.length}`, results: topRanked, fetchedContent: finalContent };
+}
+
 export async function performSearch(query: string, backend: 'duckduckgo' | 'searxng' | 'unsearch' = 'searxng', searxngUrl?: string): Promise<{ results: SearchResult[]; fetchedContent: string }> {
   let results: SearchResult[] = [];
 
@@ -226,35 +451,30 @@ export async function* streamChat(
   // Pre-process Deep Search for non-Gemini models
   let processedMessages = [...messages];
   let searchResults: SearchResult[] = [];
+  const searchStatusUpdates: string[] = [];
   if (activeFeature === 'deep-search' && config.provider !== 'gemini') {
+    if (messages.length === 0) throw new Error("No message history to search for.");
     const latestQuery = messages[messages.length - 1].content;
     const backend = config.searchBackend || 'searxng';
     
-    yield "🔍 Searching the web...\n\n";
-    const { results, fetchedContent } = await performSearch(latestQuery, backend, config.searxngUrl);
-    searchResults = results;
-    lastSearchResults = results;
-    
-    let statusMsg = '';
-    if (results.length > 0) {
-      statusMsg = `Found ${results.length} results`;
-      if (fetchedContent) {
-        statusMsg += `. Reading top pages...\n\n`;
-        yield `📄 ${statusMsg}`;
-      } else {
-        statusMsg += `\n\n`;
-        yield `✅ ${statusMsg}`;
+    const deepSearch = performDeepSearch(latestQuery, backend, config.searxngUrl, signal);
+    for await (const event of deepSearch) {
+      searchStatusUpdates.push(event.message);
+      if (event.type === 'search' || event.type === 'status' || event.type === 'followup') {
+        yield `<!--SEARCH_STATUS:${event.message}-->`;
+      } else if (event.type === 'done') {
+        searchResults = event.results || [];
+        lastSearchResults = searchResults;
+        const enrichedPrompt = event.fetchedContent
+          ? `Here is relevant web information with full page content:\n\n${formatResults(searchResults)}\n\n${event.fetchedContent}\n\nUser Query: ${latestQuery}`
+          : `Here are the web search results:\n\n${formatResults(searchResults)}\n\nUser Query: ${latestQuery}`;
+        processedMessages[processedMessages.length - 1] = { ...processedMessages[processedMessages.length - 1], content: enrichedPrompt };
       }
-    } else {
-      yield "⚠️ No results found, answering from knowledge base...\n\n";
     }
 
-    const searchSection = fetchedContent
-      ? `Here is relevant web information with full page content:\n\n${formatResults(results)}\n\n${fetchedContent}`
-      : `Here are the web search results:\n\n${formatResults(results)}`;
-    
-    const enrichedPrompt = `${searchSection}\n\nUser Query: ${latestQuery}`;
-    processedMessages[processedMessages.length - 1] = { ...processedMessages[processedMessages.length - 1], content: enrichedPrompt };
+    if (searchResults.length === 0) {
+      yield "<!--SEARCH_STATUS:⚠️ No results found, answering from knowledge base...-->";
+    }
   }
 
   try {
@@ -357,7 +577,8 @@ export async function* streamChat(
         { role: 'system', content: systemPrompt },
         ...processedMessages.map(m => {
           const msg: any = { role: m.role === 'model' ? 'assistant' : m.role };
-          if ((m as any).imageUrl) {
+          const isTextOnly = modelName.toLowerCase().includes('llama-3.1') || modelName.toLowerCase().includes('llama-3.3') || modelName.toLowerCase().includes('deepseek-chat') || modelName.toLowerCase().includes('o1-preview') || modelName.toLowerCase().includes('o1-mini');
+          if ((m as any).imageUrl && !isTextOnly) {
             msg.content = [
               { type: 'text', text: m.content },
               { type: 'image_url', image_url: { url: (m as any).imageUrl } }

@@ -14,6 +14,7 @@ export interface Message {
   isStreaming?: boolean;
   imageUrl?: string;
   searchResults?: { title: string; url: string; snippet: string; source: string }[];
+  searchStatus?: string[];
 }
 
 
