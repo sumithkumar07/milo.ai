@@ -1,13 +1,14 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useAppContext } from '../core/store';
-import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch, ChevronDown, ChevronRight } from 'lucide-react';
+import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch, ChevronDown, ChevronRight, Square, Clock, RotateCcw, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatInput from '../components/chat/ChatInput';
 import { FeatureId, Message } from '../core/types';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createHighlighter } from 'shiki';
-import { runPython, onPyodideStateChange, getPyodideState, ensurePyodideLoaded } from '../services/execution/pyodideExecutor';
+import { runPython, onPyodideStateChange, getPyodideState, ensurePyodideLoaded, interruptExecution, isExecutionRunning } from '../services/execution/pyodideExecutor';
+import { runJavaScript } from '../services/execution/jsExecutor';
 
 const commonLangs = ['javascript', 'typescript', 'python', 'jsx', 'tsx', 'html', 'css', 'json', 'bash', 'markdown', 'rust', 'java', 'c', 'cpp', 'go', 'ruby', 'php', 'swift', 'kotlin', 'r', 'sql', 'yaml', 'toml', 'xml', 'dockerfile', 'diff', 'shell'];
 
@@ -38,9 +39,13 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
   const [showPreview, setShowPreview] = useState(false);
   const [copied, setCopied] = useState(false);
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
-  const [pyResult, setPyResult] = useState<{ stdout: string; stderr: string; plots: string[]; success: boolean } | null>(null);
+  const [pyResult, setPyResult] = useState<{ stdout: string; stderr: string; plots: string[]; success: boolean; executionTimeMs?: number } | null>(null);
   const [pyRunning, setPyRunning] = useState(false);
   const [pyStatus, setPyStatus] = useState<string>('');
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [jsResult, setJsResult] = useState<{ stdout: string; stderr: string; success: boolean; executionTimeMs?: number } | null>(null);
+  const [jsRunning, setJsRunning] = useState(false);
+  let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
   useEffect(() => {
     if (!inline && language) {
@@ -66,6 +71,10 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
     setPyRunning(true);
     setPyStatus('Loading Python runtime...');
     setPyResult(null);
+    setElapsedMs(0);
+
+    const timerStart = Date.now();
+    elapsedTimer = setInterval(() => setElapsedMs(Date.now() - timerStart), 100);
 
     try {
       await ensurePyodideLoaded();
@@ -77,7 +86,29 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
       setPyResult({ stdout: '', stderr: err.message || 'Execution failed', plots: [], success: false });
       setPyStatus('');
     } finally {
+      if (elapsedTimer) clearInterval(elapsedTimer);
       setPyRunning(false);
+    }
+  };
+
+  const handleStopPython = () => {
+    interruptExecution();
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    setPyRunning(false);
+    setPyStatus('Interrupted');
+  };
+
+  const handleRunJS = async () => {
+    if (jsRunning) return;
+    setJsRunning(true);
+    setJsResult(null);
+    try {
+      const result = await runJavaScript(code);
+      setJsResult(result);
+    } catch (err: any) {
+      setJsResult({ stdout: '', stderr: err.message || 'Execution failed', success: false });
+    } finally {
+      setJsRunning(false);
     }
   };
 
@@ -109,38 +140,80 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
       <div className="my-4 border border-outline rounded-xl overflow-hidden bg-surface">
         <div className="flex items-center justify-between border-b border-outline">
           {headerButtons}
-          <button
-            onClick={handleRunPython}
-            disabled={pyRunning}
-            className={`flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-lg text-xs font-bold transition-colors ${pyRunning
-              ? 'bg-primary/20 text-primary/60 cursor-wait'
-              : 'bg-primary text-background hover:opacity-90'
-              }`}
-          >
-            {pyRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-            {pyRunning ? pyStatus || 'Running...' : 'Run'}
-          </button>
+          <div className="flex items-center gap-2 mr-2">
+            {pyRunning && (
+              <span className="text-[10px] text-on-surface-variant font-mono">
+                {(elapsedMs / 1000).toFixed(1)}s
+              </span>
+            )}
+            {pyRunning ? (
+              <button
+                onClick={handleStopPython}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+              >
+                <Square className="w-3 h-3 fill-current" /> Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleRunPython}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-background hover:opacity-90 transition-colors"
+              >
+                {pyResult ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+                {pyResult ? 'Rerun' : 'Run'}
+              </button>
+            )}
+          </div>
         </div>
         {highlightedHtml ? (
           <div className="p-4 overflow-x-auto" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
         ) : (
           <pre className="p-4 overflow-x-auto"><code>{code}</code></pre>
         )}
-        {pyResult && (
+        {pyRunning && (
+          <div className="border-t border-outline p-3 bg-surface-hover/50">
+            <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+              <span>{pyStatus}</span>
+            </div>
+          </div>
+        )}
+        {pyResult && !pyRunning && (
           <div className="border-t border-outline">
-            {pyResult.plots.map((plot, i) => (
-              <div key={i} className="p-4 bg-white">
-                <img src={`data:image/png;base64,${plot}`} alt={`Plot ${i + 1}`} className="max-w-full" />
+            {pyResult.plots.length > 0 && (
+              <div className="border-b border-outline">
+                {pyResult.plots.map((plot, i) => (
+                  <div key={i} className="p-4 bg-white">
+                    <img src={`data:image/png;base64,${plot}`} alt={`Plot ${i + 1}`} className="max-w-full" />
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
             {(pyResult.stdout || pyResult.stderr) && (
-              <div className="p-4 font-mono text-xs">
+              <div className="p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Terminal className="w-3 h-3 text-on-surface-variant" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Output</span>
+                  {pyResult.executionTimeMs && (
+                    <span className="ml-auto text-[10px] text-on-surface-variant/60 flex items-center gap-1">
+                      <Clock className="w-2.5 h-2.5" /> {(pyResult.executionTimeMs / 1000).toFixed(2)}s
+                    </span>
+                  )}
+                  <span className={`text-[10px] font-bold ${pyResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                    {pyResult.success ? 'SUCCESS' : 'FAILED'}
+                  </span>
+                </div>
                 {pyResult.stdout && (
-                  <pre className="text-green-400 whitespace-pre-wrap">{pyResult.stdout}</pre>
+                  <pre className="text-green-400 text-xs font-mono whitespace-pre-wrap bg-surface p-2 rounded-lg border border-outline/50 max-h-64 overflow-auto">{pyResult.stdout}</pre>
                 )}
                 {pyResult.stderr && (
-                  <pre className={`${pyResult.success ? 'text-amber-400' : 'text-red-400'} whitespace-pre-wrap`}>{pyResult.stderr}</pre>
+                  <pre className={`text-xs font-mono whitespace-pre-wrap bg-surface p-2 rounded-lg border border-outline/50 mt-2 max-h-64 overflow-auto ${pyResult.success ? 'text-amber-400' : 'text-red-400'}`}>{pyResult.stderr}</pre>
                 )}
+              </div>
+            )}
+            {pyResult.success && !pyResult.stdout && !pyResult.stderr && (
+              <div className="p-3 flex items-center gap-2 text-xs text-on-surface-variant/60">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                Code executed successfully (no output).
               </div>
             )}
           </div>
@@ -180,6 +253,62 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
             <pre className="p-4 overflow-x-auto"><code>{code}</code></pre>
           )}
         </div>
+      </div>
+    );
+  }
+
+  if (language === 'javascript' || language === 'typescript') {
+    return (
+      <div className="my-4 border border-outline rounded-xl overflow-hidden bg-surface">
+        <div className="flex items-center justify-between border-b border-outline">
+          {headerButtons}
+          <div className="flex items-center gap-2 mr-2">
+            {jsRunning && (
+              <span className="text-[10px] text-on-surface-variant font-mono">Running...</span>
+            )}
+            <button
+              onClick={handleRunJS}
+              disabled={jsRunning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-background hover:opacity-90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {jsRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : jsResult ? <RotateCcw className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+              {jsRunning ? 'Running...' : jsResult ? 'Rerun' : 'Run'}
+            </button>
+          </div>
+        </div>
+        {highlightedHtml ? (
+          <div className="p-4 overflow-x-auto" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <pre className="p-4 overflow-x-auto"><code>{code}</code></pre>
+        )}
+        {jsResult && !jsRunning && (
+          <div className="border-t border-outline p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Terminal className="w-3 h-3 text-on-surface-variant" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Console</span>
+              {jsResult.executionTimeMs && (
+                <span className="ml-auto text-[10px] text-on-surface-variant/60 flex items-center gap-1">
+                  <Clock className="w-2.5 h-2.5" /> {(jsResult.executionTimeMs / 1000).toFixed(2)}s
+                </span>
+              )}
+              <span className={`text-[10px] font-bold ${jsResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                {jsResult.success ? 'SUCCESS' : 'FAILED'}
+              </span>
+            </div>
+            {jsResult.stdout && (
+              <pre className="text-green-400 text-xs font-mono whitespace-pre-wrap bg-surface p-2 rounded-lg border border-outline/50 max-h-64 overflow-auto">{jsResult.stdout}</pre>
+            )}
+            {jsResult.stderr && (
+              <pre className={`text-xs font-mono whitespace-pre-wrap bg-surface p-2 rounded-lg border border-outline/50 mt-2 max-h-64 overflow-auto ${jsResult.success ? 'text-amber-400' : 'text-red-400'}`}>{jsResult.stderr}</pre>
+            )}
+            {jsResult.success && !jsResult.stdout && !jsResult.stderr && (
+              <div className="flex items-center gap-2 text-xs text-on-surface-variant/60">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                Code executed successfully (no output).
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }

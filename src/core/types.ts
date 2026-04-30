@@ -15,6 +15,7 @@ export interface Message {
   imageUrl?: string;
   searchResults?: { title: string; url: string; snippet: string; source: string }[];
   searchStatus?: string[];
+  executionResults?: { code: string; language: string; stdout: string; stderr: string; plots: string[]; success: boolean; executionTimeMs?: number }[];
 }
 
 

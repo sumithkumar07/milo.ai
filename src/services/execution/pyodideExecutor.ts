@@ -5,7 +5,9 @@ type PyodideState = 'idle' | 'loading' | 'ready' | 'error';
 let pyodide: PyodideInterface | null = null;
 let currentState: PyodideState = 'idle';
 let loadPromise: Promise<PyodideInterface> | null = null;
+let executionController: { abort: () => void } | null = null;
 const listeners: Set<(state: PyodideState, progress?: string) => void> = new Set();
+const EXECUTION_TIMEOUT_MS = 30_000;
 
 function notify(state: PyodideState, progress?: string) {
   currentState = state;
@@ -20,6 +22,17 @@ export function onPyodideStateChange(listener: (state: PyodideState, progress?: 
 
 export function getPyodideState(): PyodideState {
   return currentState;
+}
+
+export function isExecutionRunning(): boolean {
+  return executionController !== null;
+}
+
+export function interruptExecution() {
+  if (executionController) {
+    executionController.abort();
+    executionController = null;
+  }
 }
 
 export async function ensurePyodideLoaded(): Promise<PyodideInterface> {
@@ -41,15 +54,27 @@ import matplotlib.pyplot as plt
 import io
 import base64
 
-_orig_show = plt.show
-def _new_show(*args, **kwargs):
+# Store captured plots separately instead of printing markers
+_captured_plots = []
+
+def _capture_plot():
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
     buf.seek(0)
     data = base64.b64encode(buf.read()).decode('utf-8')
-    print(f'[[PLOT_DATA_START]]' + data + '[[PLOT_DATA_END]]')
     plt.close('all')
+    return data
+
+_orig_show = plt.show
+def _new_show(*args, **kwargs):
+    data = _capture_plot()
+    _captured_plots.append(data)
 plt.show = _new_show
+
+def _get_captured_plots():
+    plots = _captured_plots.copy()
+    _captured_plots.clear()
+    return plots
 `);
 
     pyodide = pyo;
@@ -71,91 +96,125 @@ export interface ExecutionResult {
   plots: string[];
   success: boolean;
   error?: string;
+  executionTimeMs?: number;
 }
-
-const PLOT_MARKER_START = '[[PLOT_DATA_START]]';
-const PLOT_MARKER_END = '[[PLOT_DATA_END]]';
 
 export async function runPython(code: string): Promise<ExecutionResult> {
   const pyo = await ensurePyodideLoaded();
+  const startTime = performance.now();
+  let timedOut = false;
+  let wasInterrupted = false;
 
-  const wrapped = `
+  executionController = { abort: () => { wasInterrupted = true; } };
+
+  try {
+    const wrapped = `
 import sys
 import io
 import base64
 import matplotlib.pyplot as plt
-
-def _capture_plot():
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
-    buf.seek(0)
-    data = base64.b64encode(buf.read()).decode('utf-8')
-    plt.close('all')
-    return "${PLOT_MARKER_START}" + data + "${PLOT_MARKER_END}"
 
 _old_stdout = sys.stdout
 _old_stderr = sys.stderr
 sys.stdout = io.StringIO()
 sys.stderr = io.StringIO()
 
+# Reset plot capture
+_captured_plots.clear()
+
 # Patch plt.show
 _orig_show = plt.show
 def _new_show(*args, **kwargs):
-    print(_capture_plot())
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+    buf.seek(0)
+    data = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close('all')
+    _captured_plots.append(data)
 plt.show = _new_show
 
+# Clear any existing figures
+plt.close('all')
+
 try:
-    plt.clf() # Clean state
     exec(compile(${JSON.stringify(code)}, '<code>', 'exec'))
-    # Auto-capture
+    # Auto-capture any remaining figures
     if len(plt.get_fignums()) > 0:
-        print(_capture_plot())
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+        buf.seek(0)
+        data = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close('all')
+        _captured_plots.append(data)
 except Exception as e:
     import traceback
     print(f"Error: {str(e)}\\n{traceback.format_exc()}", file=sys.stderr)
 finally:
-    _stdout = sys.stdout.getvalue()
-    _stderr = sys.stderr.getvalue()
     sys.stdout = _old_stdout
     sys.stderr = _old_stderr
 `;
 
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const plots: string[] = [];
+    const timeoutId = setTimeout(() => { timedOut = true; }, EXECUTION_TIMEOUT_MS);
 
-  try {
-    pyo.runPython(wrapped);
-
-    const stdoutRaw = pyo.runPython('_stdout') as string;
-    const stderrRaw = pyo.runPython('_stderr') as string;
-
-    for (const line of stdoutRaw.split('\n')) {
-      const plotMatch = line.match(new RegExp(`${PLOT_MARKER_START}(.+?)${PLOT_MARKER_END}`));
-      if (plotMatch) {
-        plots.push(plotMatch[1]);
-      } else if (line.trim()) {
-        stdout.push(line);
-      }
+    try {
+      await pyo.runPythonAsync(wrapped);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
-    if (stderrRaw.trim()) {
-      stderr.push(stderrRaw.trim());
+    if (wasInterrupted) {
+      return {
+        stdout: '',
+        stderr: 'Execution interrupted by user.',
+        plots: [],
+        success: false,
+        error: 'Interrupted',
+        executionTimeMs: performance.now() - startTime,
+      };
     }
+
+    if (timedOut) {
+      return {
+        stdout: '',
+        stderr: `Execution timed out after ${EXECUTION_TIMEOUT_MS / 1000}s. Code may contain an infinite loop or long-running operation.`,
+        plots: [],
+        success: false,
+        error: 'Timeout',
+        executionTimeMs: performance.now() - startTime,
+      };
+    }
+
+    const stdoutRaw = pyo.runPython('sys.stdout.getvalue()') as string;
+    const stderrRaw = pyo.runPython('sys.stderr.getvalue()') as string;
+    const plotsB64 = pyo.runPython('_get_captured_plots()') as string[];
 
     return {
-      stdout: stdout.join('\n'),
-      stderr: stderr.join('\n'),
-      plots,
-      success: stderr.length === 0,
+      stdout: stdoutRaw.replace(/\n$/, ''),
+      stderr: stderrRaw.replace(/\n$/, ''),
+      plots: plotsB64 || [],
+      success: stderrRaw.trim().length === 0,
+      executionTimeMs: performance.now() - startTime,
     };
   } catch (err: any) {
+    if (wasInterrupted) {
+      return {
+        stdout: '',
+        stderr: 'Execution interrupted by user.',
+        plots: [],
+        success: false,
+        error: 'Interrupted',
+        executionTimeMs: performance.now() - startTime,
+      };
+    }
     return {
-      stdout: stdout.join('\n'),
+      stdout: '',
       stderr: err.message || String(err),
-      plots,
+      plots: [],
       success: false,
       error: err.message || String(err),
+      executionTimeMs: performance.now() - startTime,
     };
+  } finally {
+    executionController = null;
   }
 }
