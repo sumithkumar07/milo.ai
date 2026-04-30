@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { FeatureId } from '../core/types';
+import { getFactsPrompt } from './memoryService';
 
 export type ModelProvider = 'gemini' | 'openai' | 'anthropic' | 'custom';
 
@@ -678,6 +679,8 @@ export async function* streamChat(
   } else {
     systemPrompt += TOOL_GATE_PROMPT;
   }
+  const facts = getFactsPrompt();
+  if (facts) systemPrompt += facts;
 
   // Pre-process Deep Search for non-Gemini models
   let processedMessages = [...messages];

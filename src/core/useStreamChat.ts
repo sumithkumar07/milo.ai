@@ -1,6 +1,7 @@
 import { useRef, useCallback } from 'react';
 import { streamChat, getLastSearchResults } from '../services/llmEngine';
 import { retrieveRelevantChunks, hasStoredDocuments } from '../services/rag/ragEngine';
+import { applySlidingWindow } from '../services/memoryService';
 import { FeatureId, Message } from './types';
 import { LLMConfig } from '../services/llmEngine';
 
@@ -24,6 +25,7 @@ interface StreamChatOptions {
   addMessage: (message: Message) => void;
   updateMessage: (id: string, content: string, isStreaming: boolean, extras?: Partial<Omit<Message, 'id' | 'role' | 'content' | 'isStreaming'>>) => void;
   setIsLoading: (loading: boolean) => void;
+  getSessionId: () => string | null;
 }
 
 function prefsToConfig(prefs: StreamChatOptions['preferences']): LLMConfig {
@@ -127,6 +129,8 @@ async function consumeStream(
 
 export function useStreamChat(options: StreamChatOptions) {
   const abortControllerRef = useRef<AbortController | null>(null);
+  const conversationSummaryRef = useRef<string>('');
+  const summarizingRef = useRef<boolean>(false);
 
   const cancel = useCallback(() => {
     if (abortControllerRef.current) {
@@ -148,8 +152,55 @@ export function useStreamChat(options: StreamChatOptions) {
       options.setIsLoading(true);
 
       try {
-        const { fullText, searchStatus } = await consumeStream(
+        // Apply sliding window with summarization
+        const modelName = options.preferences.activeProvider === 'gemini'
+          ? (options.preferences.geminiModel || 'gemini-2.5-flash')
+          : options.preferences.activeProvider === 'openai'
+          ? (options.preferences.openaiModel || 'gpt-4o')
+          : options.preferences.activeProvider === 'anthropic'
+          ? (options.preferences.anthropicModel || 'claude-3-5-sonnet-latest')
+          : (options.preferences.customModelName || 'gpt-3.5-turbo');
+
+        const { engineMessages: windowedMessages, wasSummarized } = await applySlidingWindow(
           messages,
+          conversationSummaryRef.current,
+          modelName,
+          {
+            provider: options.preferences.activeProvider,
+            geminiKey: options.preferences.geminiKey,
+            openaiKey: options.preferences.openaiKey,
+            anthropicKey: options.preferences.anthropicKey,
+            customBaseUrl: options.preferences.customBaseUrl,
+            customApiKey: options.preferences.customApiKey,
+          }
+        );
+
+        if (wasSummarized && messages.length > 12 && !summarizingRef.current) {
+          summarizingRef.current = true;
+          const summaryPrompt = `Summarize the key points, decisions, and context from this conversation for future reference.\n\n${messages.slice(0, -8).map(m => `${m.role}: ${m.content.slice(0, 300)}`).join('\n\n')}`;
+          try {
+            const { streamChat: streamChatForSummary } = await import('../services/llmEngine');
+            let summaryText = '';
+            for await (const chunk of streamChatForSummary(
+              [{ role: 'user', content: summaryPrompt }],
+              prefsToConfig(options.preferences),
+              null,
+              abortControllerRef.current.signal
+            )) {
+              summaryText += chunk;
+            }
+            if (summaryText) {
+              conversationSummaryRef.current = summaryText;
+            }
+          } catch (e) {
+            console.warn('Async summarization failed:', e);
+          } finally {
+            summarizingRef.current = false;
+          }
+        }
+
+        const { fullText, searchStatus } = await consumeStream(
+          windowedMessages as unknown as ChatMessageInput[],
           prefsToConfig(options.preferences),
           featureOverride ?? options.activeFeature,
           abortControllerRef.current.signal,

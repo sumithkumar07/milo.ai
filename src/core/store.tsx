@@ -40,6 +40,7 @@ interface AppContextType {
   addMessage: (message: Message) => void;
   updateMessage: (id: string, content: string, isStreaming: boolean, extras?: Partial<Omit<Message, 'id' | 'role' | 'content' | 'isStreaming'>>) => void;
   truncateAfter: (messageId: string) => void;
+  getSessionId: () => string | null;
 
   updateProfile: (profile: Partial<UserProfile>) => void;
   updatePreferences: (prefs: Partial<Preferences>) => void;
@@ -179,6 +180,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const getSessionId = () => currentSessionId;
+
   const updateProfile = (p: Partial<UserProfile>) => setProfile(prev => ({ ...prev, ...p }));
   const updatePreferences = (p: Partial<Preferences>) => setPreferences(prev => ({ ...prev, ...p }));
 
@@ -201,7 +204,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider value={{
       sessions, currentSessionId, messages, profile, preferences,
-      createSession, loadSession, deleteSession, clearHistory, addMessage, updateMessage, truncateAfter,
+      createSession, loadSession, deleteSession, clearHistory, addMessage, updateMessage, truncateAfter, getSessionId,
       updateProfile, updatePreferences
     }}>
       {children}

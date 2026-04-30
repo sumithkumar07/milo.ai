@@ -19,7 +19,7 @@ import { useStreamChat } from './useStreamChat';
 import { initRAG } from '../services/rag/ragEngine';
 
 export default function App() {
-  const { messages, addMessage, updateMessage, truncateAfter, currentSessionId, preferences } = useAppContext();
+  const { messages, addMessage, updateMessage, truncateAfter, currentSessionId, preferences, getSessionId } = useAppContext();
   const messagesRef = useRef(messages);
 
   useEffect(() => {
@@ -73,6 +73,7 @@ export default function App() {
     },
     updateMessage: (id, content, isStreaming, extras) => updateMessage(id, content, isStreaming, extras),
     setIsLoading,
+    getSessionId,
   });
 
   const stopGeneration = () => { cancel(); setIsLoading(false); };
