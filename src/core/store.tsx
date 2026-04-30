@@ -23,6 +23,7 @@ interface Preferences {
   anthropicModel: string;
   searchBackend: 'duckduckgo' | 'searxng' | 'unsearch';
   searxngUrl: string;
+  costOptimized: boolean;
 }
 
 interface AppContextType {
@@ -65,7 +66,8 @@ const defaultPreferences: Preferences = {
   openaiModel: 'gpt-4o',
   anthropicModel: 'claude-3-5-sonnet-latest',
   searchBackend: 'searxng',
-  searxngUrl: 'http://localhost:8080'
+  searxngUrl: 'http://localhost:8080',
+  costOptimized: true,
 };
 
 const AppContext = createContext<AppContextType | null>(null);

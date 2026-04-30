@@ -11,7 +11,8 @@ import {
   Key,
   Database,
   FileText,
-  X
+  X,
+  Zap
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAppContext } from '../core/store';
@@ -252,6 +253,33 @@ export default function SettingsView() {
                         className="flex-1 bg-surface-hover border border-outline rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-on-surface-variant" 
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cost Optimization */}
+              <div className="p-6 rounded-3xl bg-surface/50 backdrop-blur-xl border border-outline space-y-4">
+                <div className="flex items-center gap-3">
+                  <Zap className="w-5 h-5 text-yellow-400" />
+                  <h3 className="font-bold">Cost Optimization</h3>
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">Smart routing uses lightweight models for tool decisions and skips unnecessary searches. Reduces API costs 40-60%.</p>
+                
+                <div className="space-y-4 mt-2">
+                  <div className="flex justify-between items-center border-t border-outline pt-4">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Smart Query Routing</div>
+                      <div className="text-[10px] text-on-surface-variant leading-tight">Auto-detect if search/RAG/code is needed before calling expensive models.</div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer mt-1">
+                      <input 
+                        type="checkbox" 
+                        className="sr-only peer" 
+                        checked={preferences.costOptimized}
+                        onChange={(e) => updatePreferences({ costOptimized: e.target.checked })}
+                      />
+                      <div className="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-400"></div>
+                    </label>
                   </div>
                 </div>
               </div>

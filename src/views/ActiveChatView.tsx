@@ -576,7 +576,7 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
                               <div className="text-[11px] text-on-surface-variant/70 mt-0.5 line-clamp-2">
                                 {r.snippet}
                               </div>
-                              <div className="text-[10px] text-tertiary mt-1">{r.source} · {new URL(r.url).hostname}</div>
+                              <div className="text-[10px] text-tertiary mt-1">{r.source} · {(() => { try { return new URL(r.url).hostname; } catch { return 'link'; } })()}</div>
                             </div>
                           </a>
                         ))}

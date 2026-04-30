@@ -150,6 +150,9 @@ except Exception as e:
     import traceback
     print(f"Error: {str(e)}\\n{traceback.format_exc()}", file=sys.stderr)
 finally:
+    global _last_stdout, _last_stderr
+    _last_stdout = sys.stdout.getvalue()
+    _last_stderr = sys.stderr.getvalue()
     sys.stdout = _old_stdout
     sys.stderr = _old_stderr
 `;
@@ -184,8 +187,8 @@ finally:
       };
     }
 
-    const stdoutRaw = pyo.runPython('sys.stdout.getvalue()') as string;
-    const stderrRaw = pyo.runPython('sys.stderr.getvalue()') as string;
+    const stdoutRaw = pyo.runPython('_last_stdout') as string;
+    const stderrRaw = pyo.runPython('_last_stderr') as string;
     const plotsB64 = pyo.runPython('_get_captured_plots()') as string[];
 
     return {

@@ -20,6 +20,12 @@ export interface LLMConfig {
   searxngUrl?: string;
 }
 
+const TOOL_GATE_PROMPT = `\n\nTOOL USAGE GUIDELINES (CRITICAL FOR EFFICIENCY):
+- Only use web search when the question requires current, real-time, or highly specific factual information.
+- Do NOT search for: greetings, general knowledge, creative writing, code review without web context, opinions, or mathematical calculations.
+- Do NOT re-search if the conversation already contains sufficient context to answer.
+- When using search, be precise and cite sources with [1], [2] markers.`;
+
 const FEATURE_PROMPTS: Record<FeatureId, string> = {
   'deep-search': `You are MILO Deep Search Engine. Explore the topic exhaustively. Break down complex subjects into structured, detailed analysis. Provide pros/cons, historical context, and future outlooks. You have been provided with live web search results below — use them to ground your response. Cite sources using [1], [2], [3] markers inline when referencing specific facts from the search data.`,
   'code-gen': `You are MILO Code Engine, an expert programming assistant that writes executable, production-quality code.
@@ -209,6 +215,50 @@ async function searchSearXNG(query: string, baseUrl: string): Promise<SearchResu
   return res.results;
 }
 
+// ─── Smart Snippet Extraction ────────────────────────────────────────
+function extractRelevantSnippets(fullContent: string, query: string, maxChars: number = 2000): string {
+  const paragraphs = fullContent.split(/\n\s*\n/).filter(p => p.trim().length > 20);
+  if (paragraphs.length === 0) return fullContent.slice(0, maxChars);
+
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  if (terms.length === 0) return fullContent.slice(0, maxChars);
+
+  const scored = paragraphs.map(p => {
+    const lower = p.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      const count = (lower.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      score += count * 2;
+    }
+    const termPositions: number[] = [];
+    for (const term of terms) {
+      let idx = lower.indexOf(term);
+      while (idx !== -1) { termPositions.push(idx); idx = lower.indexOf(term, idx + 1); }
+    }
+    if (termPositions.length > 1) {
+      termPositions.sort((a, b) => a - b);
+      const span = termPositions[termPositions.length - 1] - termPositions[0];
+      if (span < 200) score += 5;
+      else if (span < 500) score += 2;
+    }
+    const titleWords = new Set(terms.slice(0, 3));
+    const firstSentence = p.split(/[.!?]/)[0].toLowerCase();
+    for (const tw of titleWords) { if (firstSentence.includes(tw)) score += 3; }
+    return { paragraph: p.trim(), score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  let result = '';
+  let charCount = 0;
+  for (const s of scored) {
+    if (charCount + s.paragraph.length > maxChars) break;
+    if (result) result += '\n\n---\n\n';
+    result += s.paragraph;
+    charCount += s.paragraph.length;
+  }
+  return result || fullContent.slice(0, maxChars);
+}
+
 async function fetchUrlContent(url: string): Promise<string> {
   try {
     const res = await fetch(`/api/fetch-url`, {
@@ -360,6 +410,117 @@ function generateFollowUpQueries(originalQuery: string, existingResults: SearchR
   return `${topic} expert opinion insights`;
 }
 
+// ─── Model Router ────────────────────────────────────────────────────
+interface RouteDecision {
+  needsSearch: boolean;
+  needsRAG: boolean;
+  needsCodeExec: boolean;
+  answerDirectly: boolean;
+}
+
+const ROUTER_PROMPT = `You are a query router. Classify the user's message into the required tools. Respond with ONLY a JSON object: {"search": true/false, "rag": true/false, "code": true/false}
+
+Rules:
+- "search": true only if the question requires CURRENT, REAL-TIME, or highly specific factual data not commonly known.
+- "rag": true only if the user references uploaded documents, files, or context that requires document retrieval.
+- "code": true only if the user asks for executable code, debugging, or code explanation.
+- If none apply, all false = answer directly from knowledge.
+
+Examples:
+"hello" → {"search":false,"rag":false,"code":false}
+"what's the weather today?" → {"search":true,"rag":false,"code":false}
+"explain the uploaded PDF" → {"search":false,"rag":true,"code":false}
+"write a python function to sort a list" → {"search":false,"rag":false,"code":true}
+"latest news about AI regulation 2025" → {"search":true,"rag":false,"code":false}`;
+
+async function routeQuery(
+  query: string,
+  config: LLMConfig
+): Promise<RouteDecision> {
+  try {
+    const { provider, geminiKey, openaiKey, customBaseUrl, customApiKey } = config;
+    let decision: RouteDecision | null = null;
+
+    if (provider === 'gemini' && geminiKey) {
+      const client = new GoogleGenAI({ apiKey: geminiKey });
+      const result = await client.models.generateContent({
+        model: 'gemini-2.0-flash-lite',
+        contents: `${ROUTER_PROMPT}\n\nQuery: "${query}"`,
+        config: { temperature: 0, maxOutputTokens: 50 },
+      });
+      const text = (result as any).text || '';
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) {
+        decision = JSON.parse(jsonMatch[0]);
+      }
+    } else if ((provider === 'openai' || provider === 'custom') && (openaiKey || customApiKey)) {
+      const apiKey = provider === 'custom' ? customApiKey! : openaiKey!;
+      const baseURL = provider === 'custom' ? customBaseUrl : undefined;
+      const client = new OpenAI({ apiKey, baseURL, dangerouslyAllowBrowser: true,
+        fetch: async (url, init) => {
+          const finalHeaders: Record<string, string> = {};
+          if (init?.headers) {
+            if (init.headers instanceof Headers) init.headers.forEach((v, k) => { finalHeaders[k] = v; });
+            else if (Array.isArray(init.headers)) init.headers.forEach(([k, v]) => { finalHeaders[k] = v; });
+            else Object.assign(finalHeaders, init.headers);
+          }
+          if (apiKey) finalHeaders['Authorization'] = `Bearer ${apiKey}`;
+          delete finalHeaders['authorization'];
+          return fetch('/api/proxy', {
+            method: init?.method || 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetUrl: url.toString(), method: init?.method, headers: finalHeaders, body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body })
+          });
+        }
+      });
+      const res = await client.chat.completions.create({
+        model: provider === 'custom' ? (config.customModelName || 'gpt-4o-mini') : 'gpt-4o-mini',
+        messages: [{ role: 'user', content: `${ROUTER_PROMPT}\n\nQuery: "${query}"` }],
+        temperature: 0,
+        max_tokens: 50,
+      });
+      const text = res.choices[0]?.message?.content || '';
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) {
+        decision = JSON.parse(jsonMatch[0]);
+      }
+    } else if (provider === 'anthropic' && config.anthropicKey) {
+      const client = new Anthropic({ apiKey: config.anthropicKey, dangerouslyAllowBrowser: true,
+        fetch: async (url, init) => {
+          return fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetUrl: url.toString(), method: init?.method, headers: init?.headers, body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body })
+          });
+        }
+      });
+      const res = await client.messages.create({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 50,
+        messages: [{ role: 'user', content: `${ROUTER_PROMPT}\n\nQuery: "${query}"` }],
+      });
+      const text = (res.content as any[]).find((b: any) => b.type === 'text')?.text || '';
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) {
+        decision = JSON.parse(jsonMatch[0]);
+      }
+    }
+
+    if (decision) {
+      return {
+        needsSearch: !!decision.needsSearch,
+        needsRAG: !!decision.needsRAG,
+        needsCodeExec: !!decision.needsCodeExec,
+        answerDirectly: !decision.needsSearch && !decision.needsRAG && !decision.needsCodeExec,
+      };
+    }
+  } catch (e) {
+    console.warn('Router failed, falling back to full processing:', e);
+  }
+
+  return { needsSearch: true, needsRAG: true, needsCodeExec: true, answerDirectly: false };
+}
+
 // ─── Multi-turn Agent Search Loop ─────────────────────────────────────
 export async function* performDeepSearch(
   query: string,
@@ -425,7 +586,7 @@ export async function* performDeepSearch(
         : `✅ Round ${round}: +${newResults.length} from "${roundQuery}" (${allResults.length} total)`;
       yield { type: 'status', message: resultMsg };
 
-      // Fetch content for new round results (up to 3)
+      // Fetch content for new round results (up to 3) and extract only relevant snippets
       const topFetch = newResults.slice(0, 3);
       if (topFetch.length > 0 && round < maxRounds) {
         yield { type: 'status', message: `📄 Reading ${topFetch.length} pages...` };
@@ -435,7 +596,8 @@ export async function* performDeepSearch(
         }));
         for (const c of contents) {
           if (c.content) {
-            finalContent += `\n--- Content (${c.url}) ---\n${c.content.slice(0, 4000)}\n`;
+            const snippet = extractRelevantSnippets(c.content, roundQuery, 2000);
+            finalContent += `\n--- Content (${c.url}) ---\n${snippet}\n`;
           }
         }
       }
@@ -482,7 +644,7 @@ export async function performSearch(query: string, backend: 'duckduckgo' | 'sear
     results = await searchWikipedia(query);
   }
 
-  // Fetch top 3 URLs for deeper content
+  // Fetch top 3 URLs for deeper content (snippet-extracted)
   const topUrls = results.slice(0, 3);
   const fetchPromises = topUrls.map(async (r) => {
     const content = await fetchUrlContent(r.url);
@@ -493,7 +655,8 @@ export async function performSearch(query: string, backend: 'duckduckgo' | 'sear
   let fetchedContent = '';
   for (const fc of fetchedContents) {
     if (fc.content) {
-      fetchedContent += `\n--- Content from [${fc.idx + 1}] (${results[fc.idx].url}) ---\n${fc.content.slice(0, 4000)}\n`;
+      const snippet = extractRelevantSnippets(fc.content, query, 2000);
+      fetchedContent += `\n--- Content from [${fc.idx + 1}] (${results[fc.idx].url}) ---\n${snippet}\n`;
     }
   }
 
@@ -512,6 +675,8 @@ export async function* streamChat(
   let systemPrompt = "You are MILO, an advanced AI assistant tailored for productivity and deep work.";
   if (activeFeature && FEATURE_PROMPTS[activeFeature]) {
     systemPrompt = FEATURE_PROMPTS[activeFeature];
+  } else {
+    systemPrompt += TOOL_GATE_PROMPT;
   }
 
   // Pre-process Deep Search for non-Gemini models
@@ -521,20 +686,29 @@ export async function* streamChat(
   if (activeFeature === 'deep-search' && config.provider !== 'gemini') {
     if (messages.length === 0) throw new Error("No message history to search for.");
     const latestQuery = messages[messages.length - 1].content;
-    const backend = config.searchBackend || 'searxng';
-    
-    const deepSearch = performDeepSearch(latestQuery, backend, config.searxngUrl, signal);
-    for await (const event of deepSearch) {
-      searchStatusUpdates.push(event.message);
-      if (event.type === 'search' || event.type === 'status' || event.type === 'followup') {
-        yield `<!--SEARCH_STATUS:${event.message}-->`;
-      } else if (event.type === 'done') {
-        searchResults = event.results || [];
-        lastSearchResults = searchResults;
-        const enrichedPrompt = event.fetchedContent
-          ? `Here is relevant web information with full page content:\n\n${formatResults(searchResults)}\n\n${event.fetchedContent}\n\nUser Query: ${latestQuery}`
-          : `Here are the web search results:\n\n${formatResults(searchResults)}\n\nUser Query: ${latestQuery}`;
-        processedMessages[processedMessages.length - 1] = { ...processedMessages[processedMessages.length - 1], content: enrichedPrompt };
+
+    // Route query — skip search if answer can be direct
+    const route = await routeQuery(latestQuery, config);
+    if (!route.needsSearch && !route.needsRAG) {
+      yield "<!--SEARCH_STATUS:💡 Direct answer mode — no external search needed-->";
+      searchResults = [];
+      lastSearchResults = searchResults;
+    } else {
+      const backend = config.searchBackend || 'searxng';
+      
+      const deepSearch = performDeepSearch(latestQuery, backend, config.searxngUrl, signal);
+      for await (const event of deepSearch) {
+        searchStatusUpdates.push(event.message);
+        if (event.type === 'search' || event.type === 'status' || event.type === 'followup') {
+          yield `<!--SEARCH_STATUS:${event.message}-->`;
+        } else if (event.type === 'done') {
+          searchResults = event.results || [];
+          lastSearchResults = searchResults;
+          const enrichedPrompt = event.fetchedContent
+            ? `Here is relevant web information with full page content:\n\n${formatResults(searchResults)}\n\n${event.fetchedContent}\n\nUser Query: ${latestQuery}`
+            : `Here are the web search results:\n\n${formatResults(searchResults)}\n\nUser Query: ${latestQuery}`;
+          processedMessages[processedMessages.length - 1] = { ...processedMessages[processedMessages.length - 1], content: enrichedPrompt };
+        }
       }
     }
 

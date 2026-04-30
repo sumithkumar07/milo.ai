@@ -20,6 +20,11 @@ const DB_NAME = 'milo-rag-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'vector-stores';
 
+const RELEVANCE_THRESHOLD = {
+  embedding: 0.55,
+  keyword: 1.0,
+};
+
 let db: IDBDatabase | null = null;
 let state: RAGState = { stores: [], status: 'idle', progress: '', keywordFallbackActive: false };
 let initPromise: Promise<void> | null = null;
@@ -381,6 +386,10 @@ export async function retrieveRelevantChunks(
   scored.sort((a, b) => b.score - a.score);
   const top = scored.slice(0, topK);
 
+  if (top.length > 0 && top[0].score < RELEVANCE_THRESHOLD.embedding) {
+    return { chunks: [], sources: [], scores: [] };
+  }
+
   return {
     chunks: top.map(s => s.chunk),
     sources: top.map(s => s.source),
@@ -445,7 +454,7 @@ function keywordRetrieve(query: string, topK: number): RetrievalResult {
   for (const store of state.stores) {
     for (const chunk of store.chunks) {
       const score = keywordScore(query, chunk.text);
-      if (score > 0) {
+      if (score >= RELEVANCE_THRESHOLD.keyword) {
         scored.push({ chunk, source: store.sourceName, score });
       }
     }

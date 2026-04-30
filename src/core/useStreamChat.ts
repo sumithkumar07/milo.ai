@@ -52,10 +52,11 @@ interface ChatMessageInput {
 async function enrichWithRAG(
   text: string,
   preferences: StreamChatOptions['preferences']
-): Promise<{ finalText: string; ragContext: string; ragSources: { name: string; chunkIndex: number; score?: number }[] }> {
+): Promise<{ finalText: string; ragContext: string; ragSources: { name: string; chunkIndex: number; score?: number }[]; skipped: boolean }> {
   let finalText = text;
   let ragContext = '';
   const ragSources: { name: string; chunkIndex: number; score?: number }[] = [];
+  let skipped = false;
   if (hasStoredDocuments()) {
     try {
       const retrieved = await retrieveRelevantChunks(text, 5, {
@@ -69,12 +70,14 @@ async function enrichWithRAG(
         ragContext = retrieved.chunks.map((c, i) => `[Chunk ${i + 1}] (${retrieved.sources[i] || 'document'})\n${c.text}`).join('\n\n---\n\n');
         ragSources.push(...retrieved.chunks.map((c, i) => ({ name: retrieved.sources[i] || 'unknown', chunkIndex: c.index, score: retrieved.scores[i] })));
         finalText = `You have access to the following document excerpts. Use them to answer the user's question.\n\n${ragContext}\n\n---\n\nUser Question: ${text}`;
+      } else {
+        skipped = true;
       }
     } catch (err) {
       console.error('RAG retrieval failed:', err);
     }
   }
-  return { finalText, ragContext, ragSources };
+  return { finalText, ragContext, ragSources, skipped };
 }
 
 function buildEngineMessages(
