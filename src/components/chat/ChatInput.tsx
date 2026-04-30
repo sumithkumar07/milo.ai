@@ -8,9 +8,6 @@ import {
   FileText,
   Loader2,
   Upload,
-  Zap,
-  Brain,
-  Lightbulb
 } from 'lucide-react';
 import { FeatureId, ResponseMode } from '../../core/types';
 import { FEATURES } from '../../features/features';
@@ -71,6 +68,40 @@ export default function ChatInput({
   const [keywordFallback, setKeywordFallback] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showModeSelector, setShowModeSelector] = useState(false);
+  const modeSelectorRef = useRef<HTMLDivElement>(null);
+
+  const modes = [
+    { id: 'normal' as ResponseMode, icon: '✦', label: 'Default', desc: 'Balanced responses', color: 'primary' },
+    { id: 'fast' as ResponseMode, icon: '⚡', label: 'Fast', desc: 'Concise, quick answers', color: 'amber' },
+    { id: 'deep-reasoning' as ResponseMode, icon: '🧠', label: 'Deep Reasoning', desc: 'Step-by-step analysis', color: 'blue' },
+    { id: 'deep-thinking' as ResponseMode, icon: '💭', label: 'Deep Thinking', desc: 'Multi-perspective analysis', color: 'purple' },
+  ];
+
+  const modeColors: Record<string, { active: string; hover: string; text: string }> = {
+    primary: { active: 'bg-primary/20 border-primary/40 text-primary', hover: 'hover:bg-primary/10', text: 'text-on-surface-variant' },
+    amber: { active: 'bg-amber-500/20 border-amber-500/40 text-amber-400', hover: 'hover:bg-amber-500/10', text: 'text-amber-400' },
+    blue: { active: 'bg-blue-500/20 border-blue-500/40 text-blue-400', hover: 'hover:bg-blue-500/10', text: 'text-blue-400' },
+    purple: { active: 'bg-purple-500/20 border-purple-500/40 text-purple-400', hover: 'hover:bg-purple-500/10', text: 'text-purple-400' },
+  };
+
+  const currentModeLabel = modes.find(m => m.id === responseMode)?.label || 'Default';
+  const currentModeColor = modes.find(m => m.id === responseMode)?.color || 'primary';
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modeSelectorRef.current && !modeSelectorRef.current.contains(e.target as Node)) {
+        setShowModeSelector(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleModeSelect = (mode: ResponseMode) => {
+    onResponseModeChange?.(mode);
+    setShowModeSelector(false);
+  };
 
   useEffect(() => {
     const unsub = onRAGStateChange((s) => {
@@ -373,48 +404,60 @@ export default function ChatInput({
           }}
         />
 
-        <div className="flex items-center gap-1 pr-1 pb-1">
-          <div className="flex items-center gap-1 mr-2">
-            <button
-              onClick={() => onResponseModeChange?.(responseMode === 'fast' ? 'normal' : 'fast')}
-              disabled={!!isLoading}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
-                responseMode === 'fast'
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
-              }`}
-              title="Fast Mode — concise answers"
-            >
-              <Zap className="w-3 h-3" />
-              <span className="hidden sm:inline">Fast</span>
-            </button>
-            <button
-              onClick={() => onResponseModeChange?.(responseMode === 'deep-reasoning' ? 'normal' : 'deep-reasoning')}
-              disabled={!!isLoading}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
-                responseMode === 'deep-reasoning'
-                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
-                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
-              }`}
-              title="Deep Reasoning — step-by-step analysis"
-            >
-              <Brain className="w-3 h-3" />
-              <span className="hidden sm:inline">Reason</span>
-            </button>
-            <button
-              onClick={() => onResponseModeChange?.(responseMode === 'deep-thinking' ? 'normal' : 'deep-thinking')}
-              disabled={!!isLoading}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
-                responseMode === 'deep-thinking'
-                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
-              }`}
-              title="Deep Thinking — multi-perspective analysis"
-            >
-              <Lightbulb className="w-3 h-3" />
-              <span className="hidden sm:inline">Think</span>
-            </button>
-          </div>
+        <div className="relative shrink-0 pr-1 pb-1 flex items-center gap-1" ref={modeSelectorRef}>
+          <button
+            onClick={() => setShowModeSelector(!showModeSelector)}
+            disabled={!!isLoading}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-semibold transition-all ${
+              responseMode !== 'normal'
+                ? `${modeColors[currentModeColor].active} border`
+                : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
+            }`}
+          >
+            <span>{modes.find(m => m.id === responseMode)?.icon || '✦'}</span>
+            <span>{currentModeLabel}</span>
+            <svg className={`w-3 h-3 transition-transform ${showModeSelector ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showModeSelector && (
+            <div className="absolute bottom-full right-0 mb-2 w-64 bg-surface border border-outline rounded-xl shadow-2xl overflow-hidden z-50">
+              <div className="p-1.5">
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-tertiary">
+                  Response Mode
+                </div>
+                {modes.map((mode) => {
+                  const isActive = responseMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      onClick={() => handleModeSelect(mode.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left ${
+                        isActive
+                          ? `${modeColors[mode.color].active} border`
+                          : `border border-transparent ${modeColors[mode.color].hover}`
+                      }`}
+                    >
+                      <span className="text-lg">{mode.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-[13px] font-semibold ${isActive ? modeColors[mode.color].text : 'text-on-surface-variant'}`}>
+                          {mode.label}
+                        </div>
+                        <div className="text-[11px] text-tertiary">{mode.desc}</div>
+                      </div>
+                      {isActive && (
+                        <svg className="w-4 h-4 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {isLoading ? (
             <button
               onClick={onStop}
