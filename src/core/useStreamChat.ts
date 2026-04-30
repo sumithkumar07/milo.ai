@@ -2,11 +2,12 @@ import { useRef, useCallback } from 'react';
 import { streamChat, getLastSearchResults } from '../services/llmEngine';
 import { retrieveRelevantChunks, hasStoredDocuments } from '../services/rag/ragEngine';
 import { applySlidingWindow, extractFactsFromConversation, addUserFact, archiveSession } from '../services/memoryService';
-import { FeatureId, Message } from './types';
+import { FeatureId, Message, ResponseMode } from './types';
 import { LLMConfig } from '../services/llmEngine';
 
 interface StreamChatOptions {
   activeFeature: FeatureId | null;
+  responseMode: ResponseMode;
   preferences: {
     activeProvider: string;
     geminiKey?: string;
@@ -104,9 +105,10 @@ async function consumeStream(
   config: LLMConfig,
   feature: FeatureId | null,
   signal: AbortSignal,
-  onUpdate: (id: string, text: string, streaming: boolean, extras?: Partial<Message>) => void
+  onUpdate: (id: string, text: string, streaming: boolean, extras?: Partial<Message>) => void,
+  responseMode: ResponseMode = 'normal'
 ): Promise<{ fullText: string; searchStatus: string[] }> {
-  const engineStream = streamChat(messages, config, feature, signal);
+  const engineStream = streamChat(messages, config, feature, signal, responseMode);
   let fullText = '';
   const searchStatus: string[] = [];
   const statusPattern = /<!--SEARCH_STATUS:(.*?)-->/g;
@@ -205,7 +207,8 @@ export function useStreamChat(options: StreamChatOptions) {
           prefsToConfig(options.preferences),
           featureOverride ?? options.activeFeature,
           abortControllerRef.current.signal,
-          (_id, text, streaming, extras) => options.updateMessage(modelMessageId, text, streaming, extras)
+          (_id, text, streaming, extras) => options.updateMessage(modelMessageId, text, streaming, extras),
+          options.responseMode
         );
         const feature = featureOverride ?? options.activeFeature;
         const searchResults = feature === 'deep-search' ? getLastSearchResults() : [];

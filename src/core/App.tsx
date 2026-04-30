@@ -19,7 +19,7 @@ import { useStreamChat } from './useStreamChat';
 import { initRAG } from '../services/rag/ragEngine';
 
 export default function App() {
-  const { messages, addMessage, updateMessage, truncateAfter, currentSessionId, preferences, getSessionId } = useAppContext();
+  const { messages, addMessage, updateMessage, truncateAfter, currentSessionId, preferences, getSessionId, updatePreferences } = useAppContext();
   const messagesRef = useRef(messages);
 
   useEffect(() => {
@@ -65,6 +65,7 @@ export default function App() {
 
   const { cancel, sendMessage, regenerateMessage, branchFromEdit } = useStreamChat({
     activeFeature,
+    responseMode: preferences.responseMode,
     preferences,
     getMessages: () => messagesRef.current,
     addMessage: (msg) => {
@@ -98,9 +99,9 @@ export default function App() {
   const renderView = () => {
     switch (view) {
       case 'home':
-        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={handleSendMessage} />;
+        return <HomeView activeFeature={activeFeature} setActiveFeature={setActiveFeature} setView={setView} onSendMessage={handleSendMessage} responseMode={preferences.responseMode} onResponseModeChange={(mode) => updatePreferences({ responseMode: mode })} />;
       case 'active-chat':
-        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={handleSendMessage} onStop={stopGeneration} onRegenerate={handleRegenerate} onBranchEdit={handleBranchEdit} />;
+        return <ActiveChatView activeFeature={activeFeature} setActiveFeature={setActiveFeature} messages={messages} isLoading={isLoading} onSendMessage={handleSendMessage} onStop={stopGeneration} onRegenerate={handleRegenerate} onBranchEdit={handleBranchEdit} responseMode={preferences.responseMode} onResponseModeChange={(mode) => updatePreferences({ responseMode: mode })} />;
       case 'library':
         return <LibraryView
           pinnedFeatures={pinnedFeatures}

@@ -3,7 +3,7 @@ import { useAppContext } from '../core/store';
 import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch, ChevronDown, ChevronRight, Square, Clock, RotateCcw, Terminal, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatInput from '../components/chat/ChatInput';
-import { FeatureId, Message } from '../core/types';
+import { FeatureId, Message, ResponseMode } from '../core/types';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createHighlighter } from 'shiki';
@@ -30,6 +30,8 @@ interface ActiveChatViewProps {
   onStop?: () => void;
   onRegenerate?: (messageIndex: number) => void;
   onBranchEdit?: (messageIndex: number, newContent: string) => void;
+  responseMode?: ResponseMode;
+  onResponseModeChange?: (mode: ResponseMode) => void;
 }
 
 function CodeBlock({ node, inline, className, children, ...props }: any) {
@@ -329,7 +331,7 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
   );
 }
 
-export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage, onStop, onRegenerate, onBranchEdit }: ActiveChatViewProps) {
+export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage, onStop, onRegenerate, onBranchEdit, responseMode, onResponseModeChange }: ActiveChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { preferences } = useAppContext();
   const [pyState, setPyState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -614,6 +616,8 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
             onSend={(msg, img) => onSendMessage(msg, activeFeature || undefined, img)}
             isLoading={isLoading}
             onStop={onStop}
+            responseMode={responseMode}
+            onResponseModeChange={onResponseModeChange}
             preferences={{
               activeProvider: preferences.activeProvider,
               geminiKey: preferences.geminiKey,

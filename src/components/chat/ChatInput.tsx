@@ -7,9 +7,12 @@ import {
   X,
   FileText,
   Loader2,
-  Upload
+  Upload,
+  Zap,
+  Brain,
+  Lightbulb
 } from 'lucide-react';
-import { FeatureId } from '../../core/types';
+import { FeatureId, ResponseMode } from '../../core/types';
 import { FEATURES } from '../../features/features';
 import { getModelCaps } from '../../core/modelCaps';
 import { ingestDocument, onRAGStateChange, getRAGState, clearRAG, getIndexedDocumentsInfo, isKeywordFallbackActive, deleteDocument } from '../../services/rag/ragEngine';
@@ -21,6 +24,8 @@ interface ChatInputProps {
   onRemoveFeature?: () => void;
   isLoading?: boolean;
   onStop?: () => void;
+  responseMode?: ResponseMode;
+  onResponseModeChange?: (mode: ResponseMode) => void;
   preferences?: {
     activeProvider: string;
     geminiKey?: string;
@@ -44,6 +49,8 @@ export default function ChatInput({
   onRemoveFeature,
   isLoading,
   onStop,
+  responseMode = 'normal',
+  onResponseModeChange,
   preferences
 }: ChatInputProps) {
   const feat = activeFeature ? FEATURES[activeFeature] : null;
@@ -366,7 +373,48 @@ export default function ChatInput({
           }}
         />
 
-        <div className="flex items-center gap-2 pr-1 pb-1">
+        <div className="flex items-center gap-1 pr-1 pb-1">
+          <div className="flex items-center gap-1 mr-2">
+            <button
+              onClick={() => onResponseModeChange?.(responseMode === 'fast' ? 'normal' : 'fast')}
+              disabled={!!isLoading}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
+                responseMode === 'fast'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
+              }`}
+              title="Fast Mode — concise answers"
+            >
+              <Zap className="w-3 h-3" />
+              <span className="hidden sm:inline">Fast</span>
+            </button>
+            <button
+              onClick={() => onResponseModeChange?.(responseMode === 'deep-reasoning' ? 'normal' : 'deep-reasoning')}
+              disabled={!!isLoading}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
+                responseMode === 'deep-reasoning'
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
+              }`}
+              title="Deep Reasoning — step-by-step analysis"
+            >
+              <Brain className="w-3 h-3" />
+              <span className="hidden sm:inline">Reason</span>
+            </button>
+            <button
+              onClick={() => onResponseModeChange?.(responseMode === 'deep-thinking' ? 'normal' : 'deep-thinking')}
+              disabled={!!isLoading}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition-all ${
+                responseMode === 'deep-thinking'
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
+                  : 'text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface/50'
+              }`}
+              title="Deep Thinking — multi-perspective analysis"
+            >
+              <Lightbulb className="w-3 h-3" />
+              <span className="hidden sm:inline">Think</span>
+            </button>
+          </div>
           {isLoading ? (
             <button
               onClick={onStop}

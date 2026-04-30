@@ -6,6 +6,7 @@
 export type ViewType = 'home' | 'active-chat' | 'library' | 'settings' | 'subscription' | 'help' | 'profile';
 
 export type FeatureId = 'deep-search' | 'code-gen' | 'doc-analysis';
+export type ResponseMode = 'normal' | 'fast' | 'deep-reasoning' | 'deep-thinking';
 
 export interface Message {
   id: string;

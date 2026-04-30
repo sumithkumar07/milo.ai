@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { FeatureId } from '../core/types';
+import { FeatureId, ResponseMode } from '../core/types';
 import { getFactsPrompt } from './memoryService';
 
 export type ModelProvider = 'gemini' | 'openai' | 'anthropic' | 'custom';
@@ -671,7 +671,8 @@ export async function* streamChat(
   messages: { role: 'user' | 'assistant' | 'model', content: string; imageUrl?: string }[],
   config: LLMConfig,
   activeFeature: FeatureId | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  responseMode: ResponseMode = 'normal'
 ): AsyncGenerator<string, void, unknown> {
   let systemPrompt = "You are MILO, an advanced AI assistant tailored for productivity and deep work.";
   if (activeFeature && FEATURE_PROMPTS[activeFeature]) {
@@ -679,6 +680,32 @@ export async function* streamChat(
   } else {
     systemPrompt += TOOL_GATE_PROMPT;
   }
+
+  const MODE_PROMPTS: Record<Exclude<ResponseMode, 'normal'>, string> = {
+    'fast': 'You are in Fast Mode. Be extremely concise. Answer in 1-3 sentences max. No greetings, no filler, no disclaimers. Just the answer.',
+    'deep-reasoning': 'Think step-by-step. First, analyze the problem carefully. Second, list possible approaches. Third, evaluate tradeoffs and edge cases. Finally, provide your conclusion. Show your full reasoning process.',
+    'deep-thinking': 'Provide a comprehensive, multi-perspective analysis. Consider: historical context, alternative viewpoints, long-term implications, edge cases, and counterarguments. Structure your response with clear headings and nuanced reasoning. Do not oversimplify.',
+  };
+
+  const modelName = config.provider === 'gemini'
+    ? (config.geminiModel || 'gemini-2.5-flash')
+    : config.provider === 'openai'
+    ? (config.openaiModel || 'gpt-4o')
+    : config.provider === 'anthropic'
+    ? (config.anthropicModel || 'claude-3-5-sonnet-latest')
+    : (config.customModelName || 'gpt-3.5-turbo');
+
+  const isCapableModel = /gemini.*2\.5|claude.*3\.5.*sonnet|claude.*opus/i.test(modelName);
+
+  if (responseMode !== 'normal' && MODE_PROMPTS[responseMode]) {
+    if (responseMode === 'deep-reasoning' && isCapableModel) {
+      // Skip CoT for capable models that reason internally
+      systemPrompt += '\n\nProvide a thorough, well-structured analysis.';
+    } else {
+      systemPrompt += '\n\n' + MODE_PROMPTS[responseMode];
+    }
+  }
+
   const facts = getFactsPrompt();
   if (facts) systemPrompt += facts;
 
@@ -758,6 +785,8 @@ export async function* streamChat(
           config: {
             systemInstruction: systemPrompt,
             tools: isDeepSearch ? [{ googleSearch: {} }] : undefined,
+            temperature: responseMode === 'fast' ? 0.1 : responseMode === 'deep-thinking' ? 0.8 : responseMode === 'deep-reasoning' ? 0.7 : undefined,
+            maxOutputTokens: responseMode === 'fast' ? 500 : undefined,
           },
           history: historyItems as any
       });
@@ -837,6 +866,8 @@ export async function* streamChat(
         model: modelName,
         messages: apiMessages as any,
         stream: true,
+        temperature: responseMode === 'fast' ? 0.1 : responseMode === 'deep-thinking' ? 0.8 : responseMode === 'deep-reasoning' ? 0.7 : undefined,
+        max_tokens: responseMode === 'fast' ? 500 : undefined,
       }, { signal });
 
       for await (const chunk of stream) {
@@ -880,7 +911,8 @@ export async function* streamChat(
           }
           return msg;
         }),
-        max_tokens: 4096,
+        max_tokens: responseMode === 'fast' ? 500 : 4096,
+        temperature: responseMode === 'fast' ? 0.1 : responseMode === 'deep-thinking' ? 0.8 : responseMode === 'deep-reasoning' ? 0.7 : undefined,
         stream: true,
       }, { signal });
 

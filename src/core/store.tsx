@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { ViewType, FeatureId, Message, ChatSession } from './types';
+import { ViewType, FeatureId, Message, ChatSession, ResponseMode } from './types';
 
 interface UserProfile {
   name: string;
@@ -24,6 +24,7 @@ interface Preferences {
   searchBackend: 'duckduckgo' | 'searxng' | 'unsearch';
   searxngUrl: string;
   costOptimized: boolean;
+  responseMode: ResponseMode;
 }
 
 interface AppContextType {
@@ -69,6 +70,7 @@ const defaultPreferences: Preferences = {
   searchBackend: 'searxng',
   searxngUrl: 'http://localhost:8080',
   costOptimized: true,
+  responseMode: 'normal',
 };
 
 const AppContext = createContext<AppContextType | null>(null);

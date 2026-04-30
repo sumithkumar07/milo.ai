@@ -2,7 +2,7 @@ import React from 'react';
 import { Sparkles, FileText, Code, Search, Key, Settings } from 'lucide-react';
 import ChatInput from '../components/chat/ChatInput';
 import { motion } from 'motion/react';
-import { FeatureId, ViewType } from '../core/types';
+import { FeatureId, ViewType, ResponseMode } from '../core/types';
 import { FEATURES } from '../features/features';
 import { useAppContext } from '../core/store';
 
@@ -11,9 +11,11 @@ interface HomeViewProps {
   setActiveFeature: (feature: FeatureId | null) => void;
   setView: (view: ViewType) => void;
   onSendMessage: (msg: string, overrideFeature?: FeatureId, imageUrl?: string) => void;
+  responseMode?: ResponseMode;
+  onResponseModeChange?: (mode: ResponseMode) => void;
 }
 
-export default function HomeView({ activeFeature, setActiveFeature, setView, onSendMessage }: HomeViewProps) {
+export default function HomeView({ activeFeature, setActiveFeature, setView, onSendMessage, responseMode, onResponseModeChange }: HomeViewProps) {
   const { preferences } = useAppContext();
 
   const suggestions = [
@@ -129,6 +131,8 @@ export default function HomeView({ activeFeature, setActiveFeature, setView, onS
               activeFeature={activeFeature}
               onRemoveFeature={() => setActiveFeature(null)}
               onSend={(msg, img) => onSendMessage(msg, activeFeature || undefined, img)}
+              responseMode={responseMode}
+              onResponseModeChange={onResponseModeChange}
               preferences={{
                 activeProvider: preferences.activeProvider,
                 geminiKey: preferences.geminiKey,
