@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Shield, Bell, Check, X } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useAppContext } from '../store';
+import { useAppContext } from '../core/store';
 
 export default function ProfileView() {
   const { profile, updateProfile } = useAppContext();

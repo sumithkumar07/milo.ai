@@ -1,17 +1,17 @@
 import React from 'react';
-import { 
-  PlusCircle, 
-  Library, 
-  Settings, 
-  HelpCircle, 
+import {
+  PlusCircle,
+  Library,
+  Settings,
+  HelpCircle,
   Bolt,
   MessageSquare,
   CircleDashed,
   Trash
 } from 'lucide-react';
-import { ViewType, FeatureId } from '../types';
-import { FEATURES } from '../features';
-import { useAppContext } from '../store';
+import { ViewType, FeatureId } from '../../core/types';
+import { FEATURES } from '../../features/features';
+import { useAppContext } from '../../core/store';
 
 interface SidebarProps {
   currentView: ViewType;
@@ -21,12 +21,12 @@ interface SidebarProps {
   setActiveFeature?: (feature: FeatureId | null) => void;
 }
 
-export default function Sidebar({ 
-  currentView, 
-  setView, 
-  pinnedFeatures = [], 
-  activeFeature = null, 
-  setActiveFeature 
+export default function Sidebar({
+  currentView,
+  setView,
+  pinnedFeatures = [],
+  activeFeature = null,
+  setActiveFeature
 }: SidebarProps) {
   const { sessions, currentSessionId, loadSession, createSession, deleteSession } = useAppContext();
   const navItems = [
@@ -52,11 +52,10 @@ export default function Sidebar({
                   setActiveFeature(null);
                 }
               }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                isActive 
-                  ? 'bg-secondary text-primary' 
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${isActive
+                  ? 'bg-secondary text-primary'
                   : 'text-on-surface-variant hover:text-primary hover:bg-surface-hover'
-              }`}
+                }`}
             >
               <item.icon className="w-4 h-4" />
               {item.label}
@@ -74,17 +73,17 @@ export default function Sidebar({
               if (!feat) return null;
               const isActiveFeature = activeFeature === featId && currentView === 'home';
               return (
-                <button 
+                <button
                   key={featId}
                   onClick={() => {
+                    createSession();
                     if (setActiveFeature) setActiveFeature(featId);
                     setView('home');
                   }}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-                    isActiveFeature
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${isActiveFeature
                       ? 'bg-secondary text-primary'
                       : 'text-on-surface-variant hover:text-primary hover:bg-surface-hover'
-                  }`}
+                    }`}
                 >
                   <feat.icon className={`w-4 h-4 ${isActiveFeature ? 'text-primary' : 'text-on-surface-variant'}`} />
                   <span className="truncate">{feat.name}</span>
@@ -99,37 +98,36 @@ export default function Sidebar({
             <div className="mt-8 mb-2 px-3">
               <span className="text-xs font-semibold text-tertiary uppercase tracking-wider">Recent Sessions</span>
             </div>
-            
+
             {sessions.map(session => (
               <div key={session.id} className="group relative flex items-center">
-                <button 
+                <button
                   onClick={() => {
                     loadSession(session.id);
                     setView('active-chat');
                   }}
-                  className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium truncate ${
-                    currentSessionId === session.id 
-                      ? 'bg-surface-hover text-primary' 
+                  className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium truncate ${currentSessionId === session.id
+                      ? 'bg-surface-hover text-primary'
                       : 'text-on-surface-variant hover:text-primary hover:bg-surface-hover'
-                  }`}
+                    }`}
                 >
                   <MessageSquare className="w-4 h-4 shrink-0" />
                   <span className="truncate">{session.title}</span>
                 </button>
-                <button 
+                <button
                   onClick={() => deleteSession(session.id)}
-                  className="absolute right-2 p-1.5 opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-red-500 hover:bg-surface rounded-md transition-all"
+                  className="absolute right-2 p-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 text-on-surface-variant hover:text-red-500 hover:bg-surface rounded-md transition-all"
+                  aria-label={`Delete session: ${session.title}`}
                 >
                   <Trash className="w-3 h-3" />
-                </button>
-              </div>
+                </button>              </div>
             ))}
           </>
         )}
       </div>
 
       <div className="mt-auto flex flex-col gap-1 pt-4 border-t border-outline">
-        <button 
+        <button
           onClick={() => setView('subscription')}
           className="w-full py-2.5 px-3 rounded-lg bg-surface-hover hover:bg-secondary transition-all text-primary text-xs font-semibold flex items-center justify-between mb-2 group"
         >
@@ -141,26 +139,24 @@ export default function Sidebar({
             Try
           </span>
         </button>
-        
-        <button 
+
+        <button
           onClick={() => setView('settings')}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-            currentView === 'settings' 
-              ? 'bg-secondary text-primary' 
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${currentView === 'settings'
+              ? 'bg-secondary text-primary'
               : 'text-on-surface-variant hover:text-primary hover:bg-surface-hover'
-          }`}
+            }`}
         >
           <Settings className="w-4 h-4" />
           Settings
         </button>
-        
-        <button 
+
+        <button
           onClick={() => setView('help')}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${
-            currentView === 'help' 
-              ? 'bg-secondary text-primary' 
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium ${currentView === 'help'
+              ? 'bg-secondary text-primary'
               : 'text-on-surface-variant hover:text-primary hover:bg-surface-hover'
-          }`}
+            }`}
         >
           <HelpCircle className="w-4 h-4" />
           Help

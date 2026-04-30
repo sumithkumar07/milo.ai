@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, X, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useAppContext } from '../store';
+import { useAppContext } from '../../core/store';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -15,12 +15,13 @@ export default function SearchModal({ isOpen, onClose, onSelectSession }: Search
   const { sessions } = useAppContext();
 
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      timeoutId = setTimeout(() => inputRef.current?.focus(), 100);
       setQuery('');
     }
+    return () => clearTimeout(timeoutId);
   }, [isOpen]);
-
   const results = sessions.filter(s => s.title.toLowerCase().includes(query.toLowerCase()) || s.messages.some(m => m.content.toLowerCase().includes(query.toLowerCase()))).slice(0, 5);
 
   return (
@@ -38,9 +39,11 @@ export default function SearchModal({ isOpen, onClose, onSelectSession }: Search
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Search sessions"
             className="fixed top-24 left-1/2 -translate-x-1/2 w-full max-w-2xl bg-surface border border-outline rounded-2xl shadow-2xl z-50 overflow-hidden"
-          >
-            <div className="flex items-center gap-3 p-4 border-b border-outline">
+          >            <div className="flex items-center gap-3 p-4 border-b border-outline">
               <Search className="w-5 h-5 text-on-surface-variant" />
               <input
                 ref={inputRef}
@@ -53,7 +56,7 @@ export default function SearchModal({ isOpen, onClose, onSelectSession }: Search
                   if (e.key === 'Enter' || e.key === 'Escape') onClose();
                 }}
               />
-              <button 
+              <button
                 onClick={onClose}
                 className="p-1 text-on-surface-variant hover:text-primary transition-colors rounded-lg bg-surface-hover"
               >
@@ -76,8 +79,11 @@ export default function SearchModal({ isOpen, onClose, onSelectSession }: Search
                     {session.title}
                   </button>
                 ))}
-                {results.length === 0 && (
+                {results.length === 0 && query.length > 0 && (
                   <div className="text-sm text-on-surface-variant py-4 px-3">No results found for "{query}"</div>
+                )}
+                {results.length === 0 && query.length === 0 && (
+                  <div className="text-sm text-on-surface-variant py-4 px-3">No recent sessions</div>
                 )}
               </div>
             </div>

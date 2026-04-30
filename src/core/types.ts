@@ -12,6 +12,7 @@ export interface Message {
   role: 'user' | 'model';
   content: string;
   isStreaming?: boolean;
+  imageUrl?: string;
 }
 
 

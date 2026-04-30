@@ -1,7 +1,7 @@
 import React from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { ViewType, FeatureId } from '../types';
+import { ViewType, FeatureId } from '../../core/types';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -21,7 +21,7 @@ export default function Layout({
   setActiveFeature 
 }: LayoutProps) {
   return (
-    <div className="min-h-screen flex text-white overflow-hidden bg-background">
+    <div className="min-h-screen flex overflow-hidden bg-background">
       <Header setView={setView} />
       <Sidebar 
         currentView={currentView} 

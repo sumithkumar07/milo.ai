@@ -1,5 +1,5 @@
 import { Search, Code, FileText, LucideIcon } from 'lucide-react';
-import { FeatureId } from './types';
+import { FeatureId } from '../core/types';
 
 export interface FeatureDef {
   id: FeatureId;
@@ -17,8 +17,8 @@ export const FEATURES: Record<FeatureId, FeatureDef> = {
   },
   'code-gen': {
     id: 'code-gen',
-    name: 'Code Generation',
-    desc: 'Write, debug, and refactor code in Python, React, and more.',
+    name: 'Code Execution',
+    desc: 'Write, run, and debug Python code directly in your browser.',
     icon: Code,
   },
   'doc-analysis': {

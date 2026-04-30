@@ -1,9 +1,9 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import { AppProvider } from './store.tsx';
-import ErrorBoundary from './components/ErrorBoundary.tsx';
-import './index.css';
+import App from './core/App';
+import { AppProvider } from './core/store';
+import ErrorBoundary from './components/chat/ErrorBoundary';
+import './styles/index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -18,6 +18,11 @@ interface Preferences {
   customApiKey: string;
   customModelName: string;
   activeProvider: 'gemini' | 'openai' | 'anthropic' | 'custom';
+  geminiModel: string;
+  openaiModel: string;
+  anthropicModel: string;
+  searchBackend: 'duckduckgo' | 'searxng' | 'unsearch';
+  searxngUrl: string;
 }
 
 interface AppContextType {
@@ -26,14 +31,15 @@ interface AppContextType {
   messages: Message[];
   profile: UserProfile;
   preferences: Preferences;
-  
+
   createSession: () => void;
   loadSession: (id: string) => void;
   deleteSession: (id: string) => void;
   clearHistory: () => void;
   addMessage: (message: Message) => void;
   updateMessage: (id: string, content: string, isStreaming: boolean) => void;
-  
+  truncateAfter: (messageId: string) => void;
+
   updateProfile: (profile: Partial<UserProfile>) => void;
   updatePreferences: (prefs: Partial<Preferences>) => void;
 }
@@ -54,34 +60,45 @@ const defaultPreferences: Preferences = {
   customBaseUrl: 'https://api.openai.com/v1',
   customApiKey: '',
   customModelName: 'gpt-3.5-turbo',
-  activeProvider: 'gemini'
+  activeProvider: 'gemini',
+  geminiModel: 'gemini-2.5-flash',
+  openaiModel: 'gpt-4o',
+  anthropicModel: 'claude-3-5-sonnet-latest',
+  searchBackend: 'duckduckgo',
+  searxngUrl: 'http://localhost:8080'
 };
 
 const AppContext = createContext<AppContextType | null>(null);
 
+const safeJsonParse = <T,>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    console.warn(`Failed to parse localStorage key "${key}", using fallback`);
+    return fallback;
+  }
+};
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const saved = localStorage.getItem('milo_sessions');
-    return saved ? JSON.parse(saved) : [];
+    return safeJsonParse('milo_sessions', []);
   });
-  
+
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
     return localStorage.getItem('milo_current_session_id') || null;
   });
-  
+
   const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem('milo_current_messages');
-    return saved ? JSON.parse(saved) : [];
+    return safeJsonParse('milo_current_messages', []);
   });
 
   const [profile, setProfile] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('milo_profile');
-    return saved ? JSON.parse(saved) : defaultProfile;
+    return safeJsonParse('milo_profile', defaultProfile);
   });
 
   const [preferences, setPreferences] = useState<Preferences>(() => {
-    const saved = localStorage.getItem('milo_preferences');
-    return saved ? JSON.parse(saved) : defaultPreferences;
+    return safeJsonParse('milo_preferences', defaultPreferences);
   });
 
   useEffect(() => {
@@ -91,33 +108,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('milo_current_session_id');
     }
   }, [currentSessionId]);
-  useEffect(() => localStorage.setItem('milo_sessions', JSON.stringify(sessions)), [sessions]);
-  useEffect(() => localStorage.setItem('milo_current_messages', JSON.stringify(messages)), [messages]);
-  useEffect(() => localStorage.setItem('milo_profile', JSON.stringify(profile)), [profile]);
-  useEffect(() => localStorage.setItem('milo_preferences', JSON.stringify(preferences)), [preferences]);
 
-  // Sync sessions with messages
   useEffect(() => {
     if (currentSessionId && messages.length > 0) {
+      const isStreaming = messages.some(m => m.isStreaming);
+      if (isStreaming) return;
+
       setSessions(prev => {
-        let exists = prev.find(s => s.id === currentSessionId);
+        const exists = prev.find(s => s.id === currentSessionId);
         if (!exists) {
-            // First message title
-            const title = messages[0].content.slice(0, 40) + '...';
-            return [{
-                id: currentSessionId,
-                title,
-                timestamp: Date.now(),
-                messages: messages,
-                tags: []
-            }, ...prev];
+          const firstContent = messages[0]?.content || 'New Chat';
+          const title = firstContent.length > 40
+            ? firstContent.slice(0, 40) + '...'
+            : firstContent;
+          return [{
+            id: currentSessionId,
+            title,
+            timestamp: Date.now(),
+            messages: messages,
+            tags: []
+          }, ...prev];
         } else {
-            return prev.map(session => session.id === currentSessionId ? { ...session, timestamp: Date.now(), messages } : session);
+          return prev.map(session => session.id === currentSessionId ? { ...session, timestamp: Date.now(), messages } : session);
         }
       });
     }
   }, [messages, currentSessionId]);
-
 
   const createSession = () => {
     setCurrentSessionId(Date.now().toString());
@@ -153,13 +169,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, content, isStreaming } : m));
   };
 
+  const truncateAfter = (messageId: string) => {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      if (idx === -1) return prev;
+      return prev.slice(0, idx + 1);
+    });
+  };
+
   const updateProfile = (p: Partial<UserProfile>) => setProfile(prev => ({ ...prev, ...p }));
   const updatePreferences = (p: Partial<Preferences>) => setPreferences(prev => ({ ...prev, ...p }));
+
+  useEffect(() => {
+    localStorage.setItem('milo_sessions', JSON.stringify(sessions));
+  }, [sessions]);
+
+  useEffect(() => {
+    localStorage.setItem('milo_current_messages', JSON.stringify(messages));
+  }, [messages]);
+
+  useEffect(() => {
+    localStorage.setItem('milo_profile', JSON.stringify(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    localStorage.setItem('milo_preferences', JSON.stringify(preferences));
+  }, [preferences]);
 
   return (
     <AppContext.Provider value={{
       sessions, currentSessionId, messages, profile, preferences,
-      createSession, loadSession, deleteSession, clearHistory, addMessage, updateMessage,
+      createSession, loadSession, deleteSession, clearHistory, addMessage, updateMessage, truncateAfter,
       updateProfile, updatePreferences
     }}>
       {children}

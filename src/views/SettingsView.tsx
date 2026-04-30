@@ -12,7 +12,7 @@ import {
   Database
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useAppContext } from '../store';
+import { useAppContext } from '../core/store';
 
 export default function SettingsView() {
   const { sessions, clearHistory, preferences, updatePreferences } = useAppContext();
@@ -130,6 +130,36 @@ export default function SettingsView() {
                       <option value="custom">Custom (OpenAI Compatible)</option>
                     </select>
                   </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-on-surface-variant font-medium">Model</span>
+                    {preferences.activeProvider === 'gemini' && (
+                      <input
+                        type="text"
+                        value={preferences.geminiModel}
+                        onChange={(e) => updatePreferences({ geminiModel: e.target.value })}
+                        className="bg-surface border border-outline rounded-lg text-xs font-semibold px-3 py-1.5 focus:outline-none focus:border-on-surface-variant text-on-surface w-48"
+                        placeholder="e.g., gemini-2.5-flash"
+                      />
+                    )}
+                    {preferences.activeProvider === 'openai' && (
+                      <input
+                        type="text"
+                        value={preferences.openaiModel}
+                        onChange={(e) => updatePreferences({ openaiModel: e.target.value })}
+                        className="bg-surface border border-outline rounded-lg text-xs font-semibold px-3 py-1.5 focus:outline-none focus:border-on-surface-variant text-on-surface w-48"
+                        placeholder="e.g., gpt-4o"
+                      />
+                    )}
+                    {preferences.activeProvider === 'anthropic' && (
+                      <input
+                        type="text"
+                        value={preferences.anthropicModel}
+                        onChange={(e) => updatePreferences({ anthropicModel: e.target.value })}
+                        className="bg-surface border border-outline rounded-lg text-xs font-semibold px-3 py-1.5 focus:outline-none focus:border-on-surface-variant text-on-surface w-48"
+                        placeholder="e.g., claude-3-5-sonnet-latest"
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-4 mt-2">
@@ -204,6 +234,42 @@ export default function SettingsView() {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Deep Search */}
+              <div className="p-6 rounded-3xl bg-surface/50 backdrop-blur-xl border border-outline space-y-4">
+                <div className="flex items-center gap-3">
+                  <Search className="w-5 h-5 text-primary" />
+                  <h3 className="font-bold">Deep Search</h3>
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">Choose how MILO searches the web. DuckDuckGo works out of the box — no setup needed.</p>
+                
+                <div className="space-y-4 mt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-on-surface-variant font-medium">Search Backend</span>
+                    <select
+                      value={preferences.searchBackend}
+                      onChange={(e) => updatePreferences({ searchBackend: e.target.value as any })}
+                      className="bg-surface border border-outline rounded-lg text-xs font-semibold px-3 py-1.5 focus:outline-none focus:border-on-surface-variant cursor-pointer text-on-surface"
+                    >
+                      <option value="duckduckgo">DuckDuckGo (No setup)</option>
+                      <option value="searxng">SearXNG (Self-hosted)</option>
+                    </select>
+                  </div>
+                  {preferences.searchBackend === 'searxng' && (
+                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-2">
+                      <label className="text-[10px] font-bold text-tertiary uppercase tracking-widest">SearXNG Instance URL</label>
+                      <input 
+                        type="text" 
+                        value={preferences.searxngUrl}
+                        onChange={(e) => updatePreferences({ searxngUrl: e.target.value })}
+                        placeholder="e.g., http://localhost:8080"
+                        className="w-full bg-surface-hover border border-outline rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-on-surface-variant" 
+                      />
+                      <p className="text-[10px] text-on-surface-variant">Run with: <code className="px-1 py-0.5 bg-surface rounded">docker run -d -p 8080:8080 searxng/searxng</code></p>
+                    </div>
+                  )}
                 </div>
               </div>
 

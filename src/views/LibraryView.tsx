@@ -8,8 +8,8 @@ import {
   PinOff
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { ViewType, FeatureId } from '../types';
-import { FEATURES } from '../features';
+import { ViewType, FeatureId } from '../core/types';
+import { FEATURES } from '../features/features';
 
 interface LibraryViewProps {
   setView: (view: ViewType) => void;

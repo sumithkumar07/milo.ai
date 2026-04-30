@@ -1,19 +1,34 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { useAppContext } from '../store';
-import { Sparkles, CheckCircle2, Loader2, Circle, Download } from 'lucide-react';
+import { useAppContext } from '../core/store';
+import { Sparkles, CheckCircle2, Loader2, Circle, Download, RefreshCw, Copy, Check, Play, Pencil, X, Save, GitBranch } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import ChatInput from '../components/ChatInput';
-import { FeatureId, Message } from '../types';
+import ChatInput from '../components/chat/ChatInput';
+import { FeatureId, Message } from '../core/types';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { createHighlighter } from 'shiki';
+import { runPython, onPyodideStateChange, getPyodideState, ensurePyodideLoaded } from '../services/execution/pyodideExecutor';
+
+const commonLangs = ['javascript', 'typescript', 'python', 'jsx', 'tsx', 'html', 'css', 'json', 'bash', 'markdown', 'rust', 'java', 'c', 'cpp', 'go', 'ruby', 'php', 'swift', 'kotlin', 'r', 'sql', 'yaml', 'toml', 'xml', 'dockerfile', 'diff', 'shell'];
+
+let highlighterInstance: Awaited<ReturnType<typeof createHighlighter>> | null = null;
+
+async function getHighlighter() {
+  if (!highlighterInstance) {
+    highlighterInstance = await createHighlighter({ themes: ['github-dark'], langs: commonLangs });
+  }
+  return highlighterInstance;
+}
 
 interface ActiveChatViewProps {
   activeFeature: FeatureId | null;
   setActiveFeature: (feature: FeatureId | null) => void;
   messages: Message[];
   isLoading: boolean;
-  onSendMessage: (msg: string, overrideFeature?: FeatureId) => void;
+  onSendMessage: (msg: string, overrideFeature?: FeatureId, imageUrl?: string) => void;
   onStop?: () => void;
+  onRegenerate?: (messageIndex: number) => void;
+  onBranchEdit?: (messageIndex: number, newContent: string) => void;
 }
 
 function CodeBlock({ node, inline, className, children, ...props }: any) {
@@ -21,33 +36,148 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
   const language = match ? match[1] : '';
   const code = String(children).replace(/\n$/, '');
   const [showPreview, setShowPreview] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+  const [pyResult, setPyResult] = useState<{ stdout: string; stderr: string; plots: string[]; success: boolean } | null>(null);
+  const [pyRunning, setPyRunning] = useState(false);
+  const [pyStatus, setPyStatus] = useState<string>('');
 
-  if (!inline && language === 'html') {
+  useEffect(() => {
+    if (!inline && language) {
+      getHighlighter().then(h => {
+        const lang = h.getLoadedLanguages().includes(language) ? language : 'plaintext';
+        const html = h.codeToHtml(code, { lang, theme: 'github-dark' });
+        setHighlightedHtml(html);
+      }).catch(() => {
+        // Fallback: highlightedHtml stays null, raw code will be displayed
+      });
+    }
+  }, [code, language, inline]);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // Optionally show error state
+    });
+  };
+  const handleRunPython = async () => {
+    if (pyRunning) return;
+    setPyRunning(true);
+    setPyStatus('Loading Python runtime...');
+    setPyResult(null);
+
+    try {
+      await ensurePyodideLoaded();
+      setPyStatus('Executing...');
+      const result = await runPython(code);
+      setPyResult(result);
+      setPyStatus('');
+    } catch (err: any) {
+      setPyResult({ stdout: '', stderr: err.message || 'Execution failed', plots: [], success: false });
+      setPyStatus('');
+    } finally {
+      setPyRunning(false);
+    }
+  };
+
+  if (inline) {
+    return (
+      <code className="px-1.5 py-0.5 rounded bg-surface border border-outline text-sm text-on-surface" {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  const headerButtons = (
+    <div className="flex items-center gap-1 px-2">
+      {language && (
+        <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant px-2">{language}</span>
+      )}
+      <button
+        onClick={handleCopy}
+        className="p-1.5 rounded hover:bg-surface-hover text-on-surface-variant hover:text-on-surface transition-colors"
+        title="Copy code"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+
+  if (language === 'python') {
     return (
       <div className="my-4 border border-outline rounded-xl overflow-hidden bg-surface">
-        <div className="flex border-b border-outline">
-          <button 
-            onClick={() => setShowPreview(false)}
-            className={`px-4 py-2 text-xs font-bold ${!showPreview ? 'bg-surface-hover text-on-surface' : 'text-on-surface-variant'}`}
+        <div className="flex items-center justify-between border-b border-outline">
+          {headerButtons}
+          <button
+            onClick={handleRunPython}
+            disabled={pyRunning}
+            className={`flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-lg text-xs font-bold transition-colors ${pyRunning
+              ? 'bg-primary/20 text-primary/60 cursor-wait'
+              : 'bg-primary text-background hover:opacity-90'
+              }`}
           >
-            Code
+            {pyRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+            {pyRunning ? pyStatus || 'Running...' : 'Run'}
           </button>
-          <button 
-            onClick={() => setShowPreview(true)}
-            className={`px-4 py-2 text-xs font-bold ${showPreview ? 'bg-surface-hover text-on-surface' : 'text-on-surface-variant'}`}
-          >
-            Preview
-          </button>
+        </div>
+        {highlightedHtml ? (
+          <div className="p-4 overflow-x-auto" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <pre className="p-4 overflow-x-auto"><code>{code}</code></pre>
+        )}
+        {pyResult && (
+          <div className="border-t border-outline">
+            {pyResult.plots.map((plot, i) => (
+              <div key={i} className="p-4 bg-white">
+                <img src={`data:image/png;base64,${plot}`} alt={`Plot ${i + 1}`} className="max-w-full" />
+              </div>
+            ))}
+            {(pyResult.stdout || pyResult.stderr) && (
+              <div className="p-4 font-mono text-xs">
+                {pyResult.stdout && (
+                  <pre className="text-green-400 whitespace-pre-wrap">{pyResult.stdout}</pre>
+                )}
+                {pyResult.stderr && (
+                  <pre className={`${pyResult.success ? 'text-amber-400' : 'text-red-400'} whitespace-pre-wrap`}>{pyResult.stderr}</pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (language === 'html') {
+    return (
+      <div className="my-4 border border-outline rounded-xl overflow-hidden bg-surface">
+        <div className="flex border-b border-outline items-center justify-between">
+          <div className="flex">
+            <button
+              onClick={() => setShowPreview(false)}
+              className={`px-4 py-2 text-xs font-bold ${!showPreview ? 'bg-surface-hover text-on-surface' : 'text-on-surface-variant'}`}
+            >
+              Code
+            </button>
+            <button
+              onClick={() => setShowPreview(true)}
+              className={`px-4 py-2 text-xs font-bold ${showPreview ? 'bg-surface-hover text-on-surface' : 'text-on-surface-variant'}`}
+            >
+              Preview
+            </button>
+          </div>
+          {headerButtons}
         </div>
         <div className="p-0">
           {showPreview ? (
             <div className="bg-white p-2 min-h-[400px]">
-               <iframe srcDoc={code} className="w-full min-h-[400px] border-none" sandbox="allow-scripts allow-modals" />
+              <iframe srcDoc={code} className="w-full min-h-[400px] border-none" sandbox="allow-scripts allow-modals" />
             </div>
+          ) : highlightedHtml ? (
+            <div className="p-4 overflow-x-auto" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
           ) : (
-            <pre className={`p-4 ${className}`} {...props}>
-              <code>{children}</code>
-            </pre>
+            <pre className="p-4 overflow-x-auto"><code>{code}</code></pre>
           )}
         </div>
       </div>
@@ -55,15 +185,37 @@ function CodeBlock({ node, inline, className, children, ...props }: any) {
   }
 
   return (
-    <pre className={className} {...props}>
-      <code>{children}</code>
-    </pre>
+    <div className="my-4 border border-outline rounded-xl overflow-hidden bg-surface">
+      <div className="flex items-center justify-between border-b border-outline">
+        {headerButtons}
+      </div>
+      {highlightedHtml ? (
+        <div className="p-4 overflow-x-auto" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+      ) : (
+        <pre className={`p-4 overflow-x-auto ${className}`} {...props}>
+          <code>{children}</code>
+        </pre>
+      )}
+    </div>
   );
 }
 
-export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage, onStop }: ActiveChatViewProps) {
+export default function ActiveChatView({ activeFeature, setActiveFeature, messages, isLoading, onSendMessage, onStop, onRegenerate, onBranchEdit }: ActiveChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { preferences } = useAppContext();
+  const [pyState, setPyState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [pyProgress, setPyProgress] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [branchedAfterIdx, setBranchedAfterIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    const unsub = onPyodideStateChange((state, progress) => {
+      setPyState(state);
+      if (progress) setPyProgress(progress);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -82,8 +234,26 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
 
   return (
     <div className="flex flex-col h-full max-w-[800px] mx-auto pt-4 pb-32">
+      {pyState === 'loading' && (
+        <div className="mb-4 p-3 bg-primary/10 border border-primary/30 rounded-lg flex items-center gap-3">
+          <Loader2 className="w-4 h-4 text-primary animate-spin" />
+          <div className="flex-1">
+            <div className="text-xs font-medium text-primary">Python Runtime Loading</div>
+            <div className="text-[10px] text-primary/70">{pyProgress}</div>
+          </div>
+        </div>
+      )}
+      {pyState === 'error' && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-3">
+          <Circle className="w-4 h-4 text-red-400" />
+          <div className="flex-1">
+            <div className="text-xs font-medium text-red-400">Python Runtime Error</div>
+            <div className="text-[10px] text-red-400/70">{pyProgress}</div>
+          </div>
+        </div>
+      )}
       <div className="flex justify-end mb-6">
-        <button 
+        <button
           onClick={exportChat}
           className="flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-hover border border-outline rounded-lg text-xs font-bold text-on-surface-variant hover:text-on-surface transition-colors"
         >
@@ -91,69 +261,152 @@ export default function ActiveChatView({ activeFeature, setActiveFeature, messag
         </button>
       </div>
       <div className={`flex flex-col ${preferences.compactMode ? 'gap-3' : 'gap-8'}`}>
-      <AnimatePresence initial={false}>
-        {messages.map((message) => (
-          message.role === 'user' ? (
-            <div key={message.id} className="flex justify-end w-full">
-              <motion.div 
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={`max-w-[85%] bg-surface/80 backdrop-blur-md border border-white/5 shadow-sm
+        <AnimatePresence initial={false}>
+          {messages.map((message, msgIndex) => (
+            message.role === 'user' ? (
+              <div key={message.id} className="flex justify-end w-full">
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className={`max-w-[85%] bg-surface/80 backdrop-blur-md border border-white/5 shadow-sm
                   ${preferences.compactMode ? 'rounded-xl px-4 py-2 text-sm' : 'rounded-2xl rounded-tr-sm px-5 py-4'}
                 `}
-              >
-                <div className="text-on-background whitespace-pre-wrap">{message.content}</div>
-              </motion.div>
-            </div>
-          ) : (
-            <div key={message.id} className="flex w-full gap-4 items-start">
-              <div className={`flex-shrink-0 flex items-center justify-center bg-surface border border-outline mt-1
+                >
+                  {editingId === message.id ? (
+                    <div className="space-y-2">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="w-full bg-transparent border border-outline rounded-lg p-2 text-sm text-on-background resize-none outline-none focus:border-primary"
+                        rows={3}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && e.ctrlKey) {
+                            setEditingId(null);
+                            onBranchEdit?.(msgIndex, editText);
+                            setBranchedAfterIdx(msgIndex);
+                          }
+                          if (e.key === 'Escape') {
+                            setEditingId(null);
+                          }
+                        }}
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-on-surface-variant hover:text-on-background hover:bg-surface-hover transition-colors"
+                        >
+                          <X className="w-3 h-3" /> Cancel
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingId(null);
+                            onBranchEdit?.(msgIndex, editText);
+                            setBranchedAfterIdx(msgIndex);
+                          }}
+                          disabled={!editText.trim()}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Save className="w-3 h-3" /> Save & Branch
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {message.imageUrl && (
+                        <img src={message.imageUrl} alt="Attached" className="max-h-60 rounded-lg mb-2 object-contain" />
+                      )}
+                      <div className="text-on-background whitespace-pre-wrap">{message.content}</div>
+                      {!isLoading && (
+                        <div className="flex items-center gap-1 mt-2 opacity-100 transition-opacity">
+                          <button
+                            onClick={() => { setEditingId(message.id); setEditText(message.content); }}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </motion.div>
+              </div>
+            ) : (
+              <div key={message.id} className="flex w-full gap-4 items-start">
+                <div className={`flex-shrink-0 flex items-center justify-center bg-surface border border-outline mt-1
                 ${preferences.compactMode ? 'w-6 h-6 rounded-md' : 'w-8 h-8 rounded-full'}
               `}>
-                <Sparkles className={`text-primary ${preferences.compactMode ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
-              </div>
-              
-              <div className="flex-1 flex flex-col gap-6">
-                {message.isStreaming && message.content === '' && (
-                  <div className={`max-w-2xl opacity-30 ${preferences.compactMode ? 'space-y-2 mt-1' : 'space-y-3 mt-2'}`}>
-                    <div className="h-3.5 bg-outline rounded-full w-full animate-pulse" />
-                    <div className="h-3.5 bg-outline rounded-full w-[94%] animate-pulse" />
-                    <div className="h-3.5 bg-outline rounded-full w-[80%] animate-pulse" />
-                  </div>
-                )}
-                {message.content && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-surface prose-pre:border-outline max-w-none text-on-background w-full overflow-hidden
+                  <Sparkles className={`text-primary ${preferences.compactMode ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
+                </div>
+
+                <div className="flex-1 flex flex-col gap-2">
+                  {branchedAfterIdx !== null && msgIndex === branchedAfterIdx + 1 && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-primary/80 font-medium">
+                      <GitBranch className="w-3 h-3" />
+                      Branched from edited message
+                    </div>
+                  )}
+                  {message.isStreaming && message.content === '' && (
+                    <div className={`max-w-2xl opacity-30 ${preferences.compactMode ? 'space-y-2 mt-1' : 'space-y-3 mt-2'}`}>
+                      <div className="h-3.5 bg-outline rounded-full w-full animate-pulse" />
+                      <div className="h-3.5 bg-outline rounded-full w-[94%] animate-pulse" />
+                      <div className="h-3.5 bg-outline rounded-full w-[80%] animate-pulse" />
+                    </div>
+                  )}
+                  {message.content && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`prose prose-invert prose-p:leading-relaxed prose-pre:bg-surface prose-pre:border-outline max-w-none text-on-background w-full overflow-hidden
                       ${preferences.compactMode ? 'prose-sm' : ''}
                     `}
-                  >
-                    <Markdown 
-                      remarkPlugins={[remarkGfm]}
-                      components={{ code: CodeBlock as any }}
                     >
-                      {message.content}
-                    </Markdown>
-                  </motion.div>
-                )}
+                      <Markdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{ code: CodeBlock as any }}
+                      >
+                        {message.content}
+                      </Markdown>
+                    </motion.div>
+                  )}
+                  {!message.isStreaming && onRegenerate && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          const idx = messages.findIndex(m => m.id === message.id);
+                          if (idx !== -1) onRegenerate(idx);
+                        }}
+                        disabled={isLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-on-surface-variant hover:text-on-background hover:bg-surface border border-outline transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Regenerate
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        ))}
-      </AnimatePresence>
+            )
+          ))}
+        </AnimatePresence>
       </div>
       <div ref={bottomRef} />
 
       {/* Persistent Input at bottom */}
       <div className="fixed bottom-0 left-0 md:left-72 right-0 p-4 md:p-8 flex justify-center pointer-events-none z-50">
         <div className="w-full max-w-[800px] pointer-events-auto">
-          <ChatInput 
-            activeFeature={activeFeature} 
-            onRemoveFeature={() => setActiveFeature(null)} 
-            onSend={(msg) => onSendMessage(msg, activeFeature || undefined)}
+          <ChatInput
+            activeFeature={activeFeature}
+            onRemoveFeature={() => setActiveFeature(null)}
+            onSend={(msg, img) => onSendMessage(msg, activeFeature || undefined, img)}
             isLoading={isLoading}
             onStop={onStop}
+            preferences={{
+              activeProvider: preferences.activeProvider,
+              geminiKey: preferences.geminiKey,
+              openaiKey: preferences.openaiKey,
+              customBaseUrl: preferences.customBaseUrl,
+              customApiKey: preferences.customApiKey,
+            }}
           />
         </div>
       </div>
